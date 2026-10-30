@@ -1,5 +1,5 @@
 # Gateway configuration. Pin numbers are BCM GPIO numbers, not header pin numbers.
-# A value of -1 for an input pin means that input is not connected.
+# A negative number for an input pin means that input is not connected.
 
 [can]
 interface = "socketcan"

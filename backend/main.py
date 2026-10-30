@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sklearn.ensemble import RandomForestRegressor
 
 from shared import gateway_rules as rules
-from shared.can_frames import (  # noqa: F401  (re-exported for callers and tests)
+from shared.can_frames import (  # noqa: F401  (exported again for callers and tests)
     CAN_ID_ALARMS,
     CAN_ID_LIMITS,
     CAN_ID_MEASURE,

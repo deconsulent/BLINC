@@ -1,7 +1,7 @@
 # gateway/buses.py
 # Opens the two CAN buses. Live mode uses SocketCAN interfaces (can0 and can1).
 # Demo mode needs no hardware. It tries Linux vcan interfaces first and falls back to an
-# in memory bus from python-can when vcan is not available (a Mac, a container without
+# in memory bus from the python can package when vcan is not available (a Mac, a container without
 # the vcan kernel module, or no permission to create the interfaces).
 import logging
 import os

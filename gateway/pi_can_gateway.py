@@ -264,9 +264,9 @@ class PiCanGateway:
             return dict(self._published)
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Status page: GET /state and GET /health. Read only, no control endpoints.
-# ---------------------------------------------------------------------------
+# ===========================================================================
 def make_handler(gateway: PiCanGateway):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -290,13 +290,13 @@ def make_handler(gateway: PiCanGateway):
 
 def serve_http(gateway: PiCanGateway, host: str, port: int) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), make_handler(gateway))
-    threading.Thread(target=server.serve_forever, daemon=True, name="gateway-http").start()
+    threading.Thread(target=server.serve_forever, daemon=True, name="gateway_http").start()
     return server
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Wiring for the two run modes
-# ---------------------------------------------------------------------------
+# ===========================================================================
 class Runtime:
     def __init__(self, gateway: PiCanGateway, buses: bus_mod.BusSet, relays: RelayBoard, bms: Optional[FakeBms] = None):
         self.gateway = gateway
@@ -332,7 +332,7 @@ class Runtime:
                 self._bg_stop.wait(0.05)
 
         for target in (lambda: self.bms.run(self._bg_stop), monitor_loop):
-            t = threading.Thread(target=target, daemon=True, name="gateway-demo")
+            t = threading.Thread(target=target, daemon=True, name="gateway_demo")
             t.start()
             self._threads.append(t)
 
