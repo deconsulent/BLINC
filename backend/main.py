@@ -1,12 +1,27 @@
 # backend/main.py
 # SecondPulse API: battery triage (SOH model plus tier rules) and a CAN gateway simulation.
-import struct
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sklearn.ensemble import RandomForestRegressor
+
+from shared import gateway_rules as rules
+from shared.can_frames import (  # noqa: F401  (exported again for callers and tests)
+    CAN_ID_ALARMS,
+    CAN_ID_LIMITS,
+    CAN_ID_MEASURE,
+    CAN_ID_SOC_SOH,
+    PROT2_SYSTEM_ERROR,
+    build_frame_351,
+    build_frame_355,
+    build_frame_356,
+    build_frame_359,
+    decode_frame,
+    describe_frame,
+    hex_bytes,
+)
 
 app = FastAPI(
     title="SecondPulse Battery Triage and CAN Gateway API",
@@ -48,11 +63,12 @@ ASSUMPTIONS: Dict = {
         "kwh_per_escooter_charge": 0.55,
         "kwh_per_ebike_charge": 0.65,
     },
+    # eur None means the item has not been priced yet. The UI shows it as not priced.
     "gateway_bom_eur": [
         {
-            "item": "Dual CAN ESP32 board",
-            "eur": 15.0,
-            "role": "Bridges the pack side CAN bus and the inverter side CAN bus.",
+            "item": "Raspberry Pi 4 and dual channel CAN HAT",
+            "eur": None,
+            "role": "Runs the gateway service. Reads the pack side CAN bus and writes the inverter side CAN bus.",
         },
         {
             "item": "12 V supply and contactor relay",
@@ -70,14 +86,13 @@ ASSUMPTIONS: Dict = {
 # Triage thresholds from the project spec
 TIER1_MIN_SOH_PCT = 74.0
 TIER1_MAX_SPREAD_MV = 45.0
-BLOCK_MAX_SPREAD_MV = 100.0
+BLOCK_MAX_SPREAD_MV = rules.IMBALANCE_CUTOFF_MV
 BLOCK_MIN_SOH_PCT = 62.0
 
-# Project design value for the gateway. Not taken from the Battery Emulator source.
-PRECHARGE_HOLD_MS = 1500
+PRECHARGE_HOLD_MS = rules.PRECHARGE_HOLD_MS
 
 TIER_NAMES = {
-    1: "Tier 1: Whole Pack Reuse via ESP32 CAN Gateway (Zero Teardown)",
+    1: "Tier 1: Whole Pack Reuse via CAN Gateway (Zero Teardown)",
     2: "Tier 2: Module Level 48V Repackaging (Intact Factory Modules)",
     3: "Tier 3: Direct Hydrometallurgical Recycling (Safety / End of Life Gate)",
 }
@@ -312,87 +327,7 @@ class GatewayResponse(BaseModel):
 
 
 # ===========================================================================
-# 6. CAN FRAMES (Pylontech style, little endian, 8 bytes each)
-# Layout checked against PYLON-LV-CAN.cpp in the Battery Emulator project.
-# Differences from that file:
-#  * Frames are padded to 8 bytes. The emulator sends shorter frames.
-#  * 0x351 bytes 6 and 7 carry the discharge voltage limit, as in the Pylontech documents.
-#  * 0x356 voltage is unsigned here. The low voltage spec uses int16, which stops at
-#    327.67 V, and these packs run at 350 V and above.
-#  * The protocol has no cell imbalance bit. An imbalance cutoff is reported as the
-#    system error bit in 0x359 byte 1.
-# ===========================================================================
-CAN_ID_LIMITS = 0x351
-CAN_ID_SOC_SOH = 0x355
-CAN_ID_MEASURE = 0x356
-CAN_ID_ALARMS = 0x359
-PROT2_SYSTEM_ERROR = 0x80
-PACK_COUNT = 1
-
-
-def _u16(value: float) -> int:
-    return max(0, min(0xFFFF, int(round(value))))
-
-
-def _s16(value: float) -> int:
-    return max(-0x8000, min(0x7FFF, int(round(value))))
-
-
-def build_frame_351(chg_v: float, chg_a: float, dis_a: float, dis_v: float) -> bytes:
-    return struct.pack("<HHHH", _u16(chg_v * 10), _u16(chg_a * 10), _u16(dis_a * 10), _u16(dis_v * 10))
-
-
-def build_frame_355(soc_pct: float, soh_pct: float) -> bytes:
-    return struct.pack("<HH4x", _u16(soc_pct), _u16(soh_pct))
-
-
-def build_frame_356(volt_v: float, current_a: float, temp_c: float) -> bytes:
-    return struct.pack("<Hhh2x", _u16(volt_v * 100), _s16(current_a * 10), _s16(temp_c * 10))
-
-
-def build_frame_359(prot1: int, prot2: int, alarm1: int, alarm2: int) -> bytes:
-    return struct.pack("<BBBBB2sx", prot1, prot2, alarm1, alarm2, PACK_COUNT, b"PN")
-
-
-def decode_frame(can_id: int, data: bytes) -> Dict:
-    """Decode one of the four frames back to engineering units."""
-    if len(data) != 8:
-        raise ValueError("expected 8 bytes")
-    if can_id == CAN_ID_LIMITS:
-        cv, ca, da, dv = struct.unpack("<HHHH", data)
-        return {"chg_v": cv / 10, "chg_a": ca / 10, "dis_a": da / 10, "dis_v": dv / 10}
-    if can_id == CAN_ID_SOC_SOH:
-        soc, soh = struct.unpack("<HH4x", data)
-        return {"soc": soc, "soh": soh}
-    if can_id == CAN_ID_MEASURE:
-        volt, cur, temp = struct.unpack("<Hhh2x", data)
-        return {"volt_v": volt / 100, "current_a": cur / 10, "temp_c": temp / 10}
-    if can_id == CAN_ID_ALARMS:
-        p1, p2, a1, a2, packs, tag = struct.unpack("<BBBBB2sx", data)
-        return {"prot1": p1, "prot2": p2, "alarm1": a1, "alarm2": a2, "packs": packs, "tag": tag.decode("ascii")}
-    raise ValueError(f"unknown CAN id {can_id:#x}")
-
-
-def describe_frame(can_id: int, data: bytes) -> str:
-    d = decode_frame(can_id, data)
-    if can_id == CAN_ID_LIMITS:
-        return f"V_chg_max={d['chg_v']:.1f} V, I_chg_max={d['chg_a']:.1f} A, I_dis_max={d['dis_a']:.1f} A, V_dis_min={d['dis_v']:.1f} V"
-    if can_id == CAN_ID_SOC_SOH:
-        return f"SOC={d['soc']} %, SOH={d['soh']} %"
-    if can_id == CAN_ID_MEASURE:
-        return f"V_pack={d['volt_v']:.2f} V, I={d['current_a']:.1f} A, T={d['temp_c']:.1f} C"
-    return (
-        f"prot1={d['prot1']:#04x}, prot2={d['prot2']:#04x}, alarm1={d['alarm1']:#04x}, "
-        f"alarm2={d['alarm2']:#04x}, packs={d['packs']}, tag={d['tag']}"
-    )
-
-
-def _hex(data: bytes) -> str:
-    return " ".join(f"{b:02X}" for b in data)
-
-
-# ===========================================================================
-# 7. ENDPOINTS
+# 6. ENDPOINTS
 # ===========================================================================
 @app.get("/api/health")
 def health():
@@ -432,7 +367,7 @@ def evaluate_battery_pack(req: TriageRequest):
         rul_cycles, rul_years, capex_kwh = 0, 0.0, None
     elif tier == 1:
         app_desc = (
-            "Deploy the intact pack behind an ESP32 CAN gateway for off grid solar micromobility "
+            "Deploy the intact pack behind a CAN gateway for off grid solar micromobility "
             "charging hubs or substation peak shaving buffers."
         )
         safety_status = "PASS: approved for whole pack CAN emulation"
@@ -495,60 +430,48 @@ def simulate_can_gateway(req: GatewaySimRequest):
     delta_mv = int(round((max_cell_v - min_cell_v) * 1000))
     pack_voltage = round(sum(cell_voltages), 1)
 
-    # Hold CAN TX until the precharge time has passed
-    if req.time_since_enable_ms < PRECHARGE_HOLD_MS:
+    out = rules.evaluate(
+        rules.PackParams(
+            nominal_kwh=spec["nominal_kwh"],
+            nominal_voltage=spec["nominal_voltage"],
+            cells_series=n_series,
+            c_rate=ASSUMPTIONS["second_life"]["max_c_rate"],
+        ),
+        rules.GatewayInputs(
+            soc_pct=req.pack_soc_pct,
+            soh_pct=req.pack_soh_pct,
+            temp_c=req.pack_temp_c,
+            pack_voltage_v=pack_voltage,
+            delta_mv=delta_mv,
+            enable_high=True,
+            ms_since_enable=req.time_since_enable_ms,
+            iso_pulse_active=req.inverter_isolation_pulse_active,
+            imbalance_fault=req.cell_imbalance_fault,
+        ),
+    )
+    can_tx_enabled = out.tx_enabled
+    if out.state == rules.STATE_PRECHARGE:
         contactor_state = "PRECHARGING"
         contactor_detail = f"CAN TX held until {PRECHARGE_HOLD_MS} ms after enable"
-        can_tx_enabled = False
-        max_charge_a = max_discharge_a = 0.0
     else:
         contactor_state = "CLOSED"
         contactor_detail = "HV bus active"
-        can_tx_enabled = True
-        base_a = round(
-            (spec["nominal_kwh"] * 1000.0 / spec["nominal_voltage"]) * ASSUMPTIONS["second_life"]["max_c_rate"], 1
-        )
-        temp_derate = 0.5 if req.pack_temp_c > 38.0 or req.pack_temp_c < 5.0 else 1.0
-        max_charge_a = round(base_a * temp_derate * (0.25 if req.pack_soc_pct > 88.0 else 1.0), 1)
-        max_discharge_a = round(base_a * temp_derate * (0.25 if req.pack_soc_pct < 18.0 else 1.0), 1)
-
-    # The inverter's isolation test and the OEM BMS isolation message collide, so the
-    # gateway masks the OEM message while the pulse is active (see Battery Emulator issue 1959).
-    iso_masked = req.inverter_isolation_pulse_active
+    iso_masked = out.iso_masked
     isolation_status = (
         "OEM isolation message masked during inverter isolation pulse" if iso_masked else "Normal, no pulse active"
     )
 
-    prot2 = 0
-    imbalance = req.cell_imbalance_fault or delta_mv > BLOCK_MAX_SPREAD_MV
-    if imbalance:
-        protection_alarm = "CELL_IMBALANCE_CUTOFF (reported as system error bit 0x80 in 0x359 byte 1)"
-        prot2 |= PROT2_SYSTEM_ERROR
-        max_charge_a = max_discharge_a = 0.0
-    else:
-        protection_alarm = "NONE"
-
-    max_charge_v = round(n_series * 4.12, 1)
-    min_discharge_v = round(n_series * 3.20, 1)
-
     status = "ACTIVE" if can_tx_enabled else f"HELD (waiting for {PRECHARGE_HOLD_MS} ms precharge)"
-    target = "Solar inverter (Pylontech style CAN)"
-    payloads = [
-        (CAN_ID_LIMITS, build_frame_351(max_charge_v, max_charge_a, max_discharge_a, min_discharge_v)),
-        (CAN_ID_SOC_SOH, build_frame_355(req.pack_soc_pct, req.pack_soh_pct)),
-        (CAN_ID_MEASURE, build_frame_356(pack_voltage, 0.0, req.pack_temp_c)),
-        (CAN_ID_ALARMS, build_frame_359(0, prot2, 0, 0)),
-    ]
     inverter_frames = [
         InverterFrame(
             can_id=f"0x{cid:03X}",
-            target=target,
+            target="Solar inverter (Pylontech style CAN)",
             tx_status=status,
-            payload_hex=_hex(data),
+            payload_hex=hex_bytes(data),
             payload_len=len(data),
             decoded=describe_frame(cid, data),
         )
-        for cid, data in payloads
+        for cid, data in out.frames
     ]
 
     # Reference labels only. The payload layout of these OEM frames is not modelled.
@@ -574,13 +497,13 @@ def simulate_can_gateway(req: GatewaySimRequest):
         can_tx_enabled=can_tx_enabled,
         isolation_status=isolation_status,
         iso_610h_masked=iso_masked,
-        protection_alarm=protection_alarm,
+        protection_alarm=out.protection_alarm,
         pack_voltage_v=pack_voltage,
         min_cell_v=min_cell_v,
         max_cell_v=max_cell_v,
         cell_delta_mv=delta_mv,
-        max_charge_a=max_charge_a,
-        max_discharge_a=max_discharge_a,
+        max_charge_a=out.max_charge_a,
+        max_discharge_a=out.max_discharge_a,
         cell_voltages=cell_voltages,
         oem_rx_frames=oem_frames,
         inverter_tx_frames=inverter_frames,

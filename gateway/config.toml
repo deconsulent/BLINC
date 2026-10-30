@@ -1,0 +1,44 @@
+# Gateway configuration. Pin numbers are BCM GPIO numbers, not header pin numbers.
+# A negative number for an input pin means that input is not connected.
+
+[can]
+interface = "socketcan"
+oem_channel = "can0"          # native EV BMS frames come in here
+inverter_channel = "can1"     # translated Pylontech style frames go out here
+tx_period_ms = 1000           # how often the four inverter frames are sent
+
+[gpio]
+precharge_relay_pin = 17
+main_relay_pin = 27
+enable_input_pin = 22         # inverter enable signal, high means enabled
+iso_pulse_input_pin = -1      # optional input that is high during the inverter isolation test
+relays_active_high = true
+inputs_pull_up = false
+# Pins used by the dual MCP2515 CAN HAT (SPI0 plus two interrupt lines). Relay and input
+# pins must not use these. Empty the list if you use USB CAN adapters.
+reserved_pins = [7, 8, 9, 10, 11, 23, 25]
+
+[pack]
+nominal_kwh = 40.0
+nominal_voltage = 350.0
+cells_series = 96
+c_rate = 0.20
+
+[bms]
+profile = "demo"              # decoder for the native BMS frames, see gateway/profiles.py
+timeout_ms = 2000             # no BMS frames for this long means protection trips
+iso_mask_grace_ms = 500       # keep masking the BMS isolation flag this long after the inverter test ends
+
+[http]
+host = "0.0.0.0"              # read only status page, keep it on a trusted network
+port = 8100
+
+[demo]
+vcan_oem = "vcan0"
+vcan_inverter = "vcan1"
+iso_period_s = 10.0
+iso_pulse_s = 1.2
+enable_period_s = 30.0
+enable_drop_s = 2.0
+imbalance_period_s = 60.0
+imbalance_len_s = 8.0

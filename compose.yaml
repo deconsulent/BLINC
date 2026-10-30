@@ -1,5 +1,8 @@
 # Backend on :8000, frontend on :8501.
 # One image is built once and used by both services, so starting does not reinstall packages.
+# The image is multi architecture and builds on arm64 (Apple silicon, Raspberry Pi 64 bit).
+# The CAN gateway is NOT part of this file. It runs directly on the Pi host so it can reach
+# the CAN interfaces and GPIO. The dashboard container reads its state page from the host.
 name: secondpulse
 
 x-app-build: &app-build
@@ -35,8 +38,11 @@ services:
       - .:/app
     environment:
       BACKEND_URL: http://backend:8000
+      GATEWAY_URL: ${GATEWAY_URL:-http://host.docker.internal:8100}
       STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
     command: streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8501:8501"
     depends_on:

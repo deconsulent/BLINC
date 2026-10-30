@@ -32,12 +32,5 @@ credentials.json
 *.swp
 .DS_Store
 
-# Arduino and PlatformIO build output
+# Build output
 build/
-.pio/
-*.elf
-*.bin
-*.hex
-*.map
-*.eep
-*.lst

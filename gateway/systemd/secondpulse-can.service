@@ -1,0 +1,17 @@
+[Unit]
+Description=Bring up can0 and can1 at 500 kbit/s for the SecondPulse gateway
+After=sys-subsystem-net-devices-can0.device sys-subsystem-net-devices-can1.device
+Wants=sys-subsystem-net-devices-can0.device sys-subsystem-net-devices-can1.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/env ip link set can0 up type can bitrate 500000
+ExecStart=/usr/bin/env ip link set can1 up type can bitrate 500000
+ExecStart=/usr/bin/env ip link set can0 txqueuelen 1000
+ExecStart=/usr/bin/env ip link set can1 txqueuelen 1000
+ExecStop=/usr/bin/env ip link set can0 down
+ExecStop=/usr/bin/env ip link set can1 down
+
+[Install]
+WantedBy=multi-user.target
