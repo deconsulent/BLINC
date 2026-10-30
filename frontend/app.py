@@ -1,7 +1,6 @@
 # frontend/app.py
 # Streamlit dashboard. Calls the FastAPI backend over HTTP and falls back to the
 # in process backend functions only when the API cannot be reached.
-import json
 import os
 import sys
 
@@ -11,6 +10,7 @@ import requests
 import streamlit as st
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000").rstrip("/")
+GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:8100").rstrip("/")
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 st.set_page_config(page_title="SecondPulse | Climathon 2026 Track 3", page_icon="🔋", layout="wide")
@@ -49,17 +49,30 @@ def fetch(method, path, payload=None):
     return r.json()
 
 
-def read_serial_json(port):
-    """Read one JSON line from a real ESP32 running the firmware in this repository."""
-    import serial
-    with serial.Serial(port, 115200, timeout=3) as s:
-        s.reset_input_buffer()
-        s.readline()  # first line may be cut off
-        line = s.readline().decode(errors="replace").strip()
-    return json.loads(line)
+def fetch_gateway_state():
+    """Read the state page of the Pi gateway. Returns None when it cannot be reached."""
+    try:
+        r = requests.get(GATEWAY_URL + "/state", timeout=(0.5, 1.5))
+        r.raise_for_status()
+        return r.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def tab2_source(gw_state, force_sim):
+    """Which source Tab 2 shows: live Pi, demo bus, or pure simulation."""
+    if gw_state is None or force_sim:
+        return "sim", "Pure simulation"
+    if gw_state.get("source") == "live":
+        return "live", "Live Pi"
+    return "demo", f"Demo bus ({gw_state.get('bus', 'unknown')})"
 
 
 badge = st.sidebar.empty()
+badge_tab2 = st.sidebar.empty()
+force_sim = st.sidebar.checkbox("Use the software simulation in Tab 2 even if the gateway answers", value=False)
+gateway_state = fetch_gateway_state()
+tab2_kind, tab2_label = tab2_source(gateway_state, force_sim)
 
 oem_db = fetch("GET", "/api/oem-models")
 A = fetch("GET", "/api/assumptions")
@@ -73,7 +86,7 @@ st.caption(
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "1. AI/ML SOH Triage & Safety Gate",
-    "2. Live ESP32 CAN Bus Gateway",
+    "2. Live CAN Bus Gateway",
     "3. Riga Micromobility Hub & ROI Calculator",
     "4. Hardware Architecture & Protection Specs",
 ])
@@ -138,7 +151,7 @@ with tab1:
 
         labor = A["labor_hours_per_kwh"]
         df_econ = pd.DataFrame([
-            {"Pathway": "Tier 1: whole pack + ESP32 gateway", "CapEx (€/kWh)": capex["tier1"], "Labor (hrs/kWh)": labor["tier1"]},
+            {"Pathway": "Tier 1: whole pack + CAN gateway", "CapEx (€/kWh)": capex["tier1"], "Labor (hrs/kWh)": labor["tier1"]},
             {"Pathway": "Tier 2: intact 48V module swap", "CapEx (€/kWh)": capex["tier2"], "Labor (hrs/kWh)": labor["tier2"]},
             {"Pathway": "Cell level teardown (hazardous)", "CapEx (€/kWh)": capex["teardown"], "Labor (hrs/kWh)": labor["teardown"]},
             {"Pathway": "New commercial LFP storage", "CapEx (€/kWh)": capex["new_lfp"], "Labor (hrs/kWh)": labor["new_lfp"]},
@@ -154,55 +167,30 @@ with tab1:
 # ===========================================================================
 # TAB 2
 # ===========================================================================
-with tab2:
-    st.subheader("Step 2: OEM BMS to solar inverter protocol translation")
-    st.markdown(
-        "This is a **simulation**. No CAN hardware is involved. It shows the frames a gateway built on the "
-        "Battery Emulator approach would send to the inverter, using a Pylontech style layout. "
-        "Cell spread and SOH come from Tab 1."
-    )
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        sim_soc = st.slider("Pack state of charge (%)", 5.0, 98.0, 78.0, step=1.0)
-        sim_temp = st.slider("Pack temperature (°C)", -5.0, 50.0, 24.5, step=0.5)
-    with c2:
-        sim_ms = st.slider(
-            "Time since inverter enable line went high (ms)", 0, 4000, 2000, step=100,
-            help="Below 1,500 ms the gateway holds CAN TX. 1,500 ms is a design value of this project.",
-        )
-        iso_pulse = st.checkbox("Inverter isolation test pulse active", value=False)
-    with c3:
-        imbalance_fault = st.checkbox("Inject cell imbalance fault (140 mV or more)", value=False)
-
-    gw = fetch("POST", "/api/can-gateway-simulate", {
-        "oem_model": oem_choice,
-        "pack_soc_pct": sim_soc,
-        "pack_soh_pct": res["predicted_soh_pct"],
-        "pack_temp_c": sim_temp,
-        "time_since_enable_ms": sim_ms,
-        "inverter_isolation_pulse_active": iso_pulse,
-        "cell_imbalance_fault": imbalance_fault,
-        "cell_delta_mv": cell_delta_mv,
-    })
-
+def render_gateway(gw):
+    """Show one gateway state. The same layout is used for the Pi gateway and for the simulation."""
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("HV contactor", gw["contactor_state"], gw["contactor_detail"], delta_color="off")
     k2.metric("DC bus voltage", f"{gw['pack_voltage_v']} V", f"Cell spread {gw['cell_delta_mv']} mV", delta_color="off")
     k3.metric("Charge current limit", f"{gw['max_charge_a']} A", "0.2C ceiling with derating", delta_color="off")
     k4.metric("Discharge current limit", f"{gw['max_discharge_a']} A", gw["protection_alarm"].split("(")[0].strip(), delta_color="off")
 
-    st.info(
-        f"**Isolation status:** {gw['isolation_status']}. "
-        f"iso_610h_masked = {str(gw['iso_610h_masked']).lower()}"
-    )
+    if "precharge_relay" in gw:
+        st.caption(
+            f"Precharge relay {'ON' if gw['precharge_relay'] else 'off'}, main relay {'ON' if gw['main_relay'] else 'off'}, "
+            f"enable input {'high' if gw['enable_high'] else 'low'}, inverter frames sent {gw['tx_count']}, "
+            f"send errors {gw['tx_errors']}, bus {gw['bus']}, GPIO {gw['gpio']}."
+        )
+        if gw["gpio"] == "mock":
+            st.warning("GPIO is mocked on this gateway, so the relay states above do not switch anything real.")
+    st.info(f"**Isolation status:** {gw['isolation_status']}. iso_610h_masked = {str(gw['iso_610h_masked']).lower()}")
     if gw["protection_alarm"] != "NONE":
         st.error(f"Protection: {gw['protection_alarm']}")
 
     col_rx, col_tx = st.columns(2)
     with col_rx:
-        st.markdown("#### Pack side frames (reference labels only)")
-        st.caption("The OEM CAN IDs are shown as labels. Their payloads are not modelled.")
+        st.markdown("#### Pack side frames")
+        st.caption("Frames read from the BMS. In the software simulation only the CAN IDs are shown, as reference labels.")
         st.dataframe(pd.DataFrame(gw["oem_rx_frames"]), use_container_width=True)
     with col_tx:
         st.markdown("#### Inverter side frames (8 byte payloads, little endian)")
@@ -211,23 +199,66 @@ with tab2:
             use_container_width=True,
         )
 
-    cell_df = pd.DataFrame({"Cell #": range(1, len(gw["cell_voltages"]) + 1), "Voltage (V)": gw["cell_voltages"]})
-    fig_cells = px.bar(
-        cell_df, x="Cell #", y="Voltage (V)",
-        title=f"Simulated cell voltages ({len(gw['cell_voltages'])}S pack, min {gw['min_cell_v']} V, max {gw['max_cell_v']} V)",
-    )
-    fig_cells.update_yaxes(range=[3.0, 4.3])
-    fig_cells.update_layout(height=280)
-    st.plotly_chart(fig_cells, use_container_width=True)
+    if gw["cell_voltages"]:
+        cell_df = pd.DataFrame({"Cell #": range(1, len(gw["cell_voltages"]) + 1), "Voltage (V)": gw["cell_voltages"]})
+        fig_cells = px.bar(
+            cell_df, x="Cell #", y="Voltage (V)",
+            title=f"Simulated cell voltages ({len(gw['cell_voltages'])}S pack, min {gw['min_cell_v']} V, max {gw['max_cell_v']} V)",
+        )
+        fig_cells.update_yaxes(range=[3.0, 4.3])
+        fig_cells.update_layout(height=280)
+        st.plotly_chart(fig_cells, use_container_width=True)
 
-    with st.expander("Optional: read one line from a real ESP32 over USB serial"):
-        st.caption("Needs the sketch in firmware/esp32_can_gateway flashed to a board. The sketch simulates the state machine and prints JSON.")
-        serial_port = st.text_input("Serial port, for example /dev/cu.SLAB_USBtoUART", value="")
-        if st.button("Read one line") and serial_port.strip():
-            try:
-                st.json(read_serial_json(serial_port.strip()))
-            except Exception as exc:
-                st.error(f"Could not read from {serial_port}: {exc}")
+
+@st.fragment(run_every="1s")
+def live_gateway_panel():
+    state = fetch_gateway_state()
+    if state is None:
+        st.warning(f"The gateway at {GATEWAY_URL} stopped answering. Reload the page to switch to the simulation.")
+        return
+    render_gateway(state)
+
+
+with tab2:
+    st.subheader("Step 2: OEM BMS to solar inverter protocol translation")
+    if tab2_kind == "sim":
+        st.markdown(
+            "Source: **pure software simulation**. No gateway is running and no CAN hardware is involved. "
+            "It shows the frames a gateway would send to the inverter, using a Pylontech style layout. "
+            "Cell spread and SOH come from Tab 1."
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            sim_soc = st.slider("Pack state of charge (%)", 5.0, 98.0, 78.0, step=1.0)
+            sim_temp = st.slider("Pack temperature (°C)", -5.0, 50.0, 24.5, step=0.5)
+        with c2:
+            sim_ms = st.slider(
+                "Time since inverter enable line went high (ms)", 0, 4000, 2000, step=100,
+                help="Below 1,500 ms the gateway holds CAN TX. 1,500 ms is a design value of this project.",
+            )
+            iso_pulse = st.checkbox("Inverter isolation test pulse active", value=False)
+        with c3:
+            imbalance_fault = st.checkbox("Inject cell imbalance fault (140 mV or more)", value=False)
+
+        gw = fetch("POST", "/api/can-gateway-simulate", {
+            "oem_model": oem_choice,
+            "pack_soc_pct": sim_soc,
+            "pack_soh_pct": res["predicted_soh_pct"],
+            "pack_temp_c": sim_temp,
+            "time_since_enable_ms": sim_ms,
+            "inverter_isolation_pulse_active": iso_pulse,
+            "cell_imbalance_fault": imbalance_fault,
+            "cell_delta_mv": cell_delta_mv,
+        })
+        render_gateway(gw)
+    else:
+        what = (
+            "the **Raspberry Pi gateway** reading a real BMS and driving real relays"
+            if tab2_kind == "live"
+            else "the **gateway in demo mode**. A fake BMS feeds it and no real hardware is involved"
+        )
+        st.markdown(f"Source: {what}, at `{GATEWAY_URL}`. The view refreshes every second. The sliders belong to the software simulation and are hidden here.")
+        live_gateway_panel()
 
 # ===========================================================================
 # TAB 3
@@ -284,10 +315,18 @@ with tab4:
     st.subheader("Step 4: Bench and field wiring specification")
     st.markdown("### Bill of materials for one gateway node")
     bom = A["gateway_bom_eur"]
-    bom_df = pd.DataFrame([{"Component": b["item"], "Unit cost (€)": b["eur"], "Role": b["role"]} for b in bom])
+    bom_df = pd.DataFrame([
+        {"Component": b["item"], "Unit cost": f"€{b['eur']:.2f}" if b["eur"] is not None else "not priced", "Role": b["role"]}
+        for b in bom
+    ])
     st.table(bom_df)
-    st.metric("Total gateway hardware (assumed prices)", f"€{sum(b['eur'] for b in bom):.2f}")
-    st.caption("Prices are project assumptions, not quotes. The firmware in this repository simulates the gateway state machine and prints JSON over serial. It does not drive CAN hardware.")
+    priced = [b["eur"] for b in bom if b["eur"] is not None]
+    st.metric("Total of priced items (assumed prices)", f"€{sum(priced):.2f}")
+    st.caption(
+        "Prices are project assumptions, not quotes. Items marked not priced are left out of the total. "
+        "A Raspberry Pi running Linux is not a safety rated controller. The hardware fuse, the battery's own BMS and the "
+        "contactors must protect the system, and the Pi must never be the only safeguard."
+    )
 
 # ===========================================================================
 # Sidebar mode badge, written last so it reflects every call made in this run
@@ -298,3 +337,5 @@ elif modes == {"local"}:
     badge.warning(f"Mode: in process fallback\n\nAPI at {BACKEND_URL} is unreachable.")
 else:
     badge.warning(f"Mode: mixed\n\nSome calls reached {BACKEND_URL}, some fell back to in process.")
+
+badge_tab2.info(f"Tab 2 source: {tab2_label}" + (f"\n\n{GATEWAY_URL}" if tab2_kind != "sim" else ""))
