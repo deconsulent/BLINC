@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets and local config
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets.toml
+credentials.json
+
+# Streamlit (shared config.toml is allowed, secrets and cache are not)
+.streamlit/secrets.toml
+.streamlit/cache/
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Arduino and PlatformIO build output
+build/
+.pio/
+*.elf
+*.bin
+*.hex
+*.map
+*.eep
+*.lst
