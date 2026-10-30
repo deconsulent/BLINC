@@ -8,7 +8,7 @@ This guide sets up the gateway on a Raspberry Pi 4 Model B with a dual channel C
 - CAN board: a **dual channel MCP2515 HAT**, such as the Waveshare 2 channel CAN HAT. This is the default because the exact board was not confirmed. The overlay lines in step 3 are for that board family. If your board is different, read your board's documentation for the oscillator and interrupt values, and do not copy these lines blindly.
 - If you use two USB CAN adapters instead, skip steps 3 and 4 and read the section "USB CAN adapters" at the end.
 
-**Honest status**: nobody has run this guide on a real Pi yet. The gateway code is tested without hardware, and the Python dependencies were checked to install on arm64 Linux in a container. The overlay lines come from the Waveshare documentation. The first run on your Pi is the real test, so follow the checks after each step.
+**Honest status**: steps 1, 2, 5 and 6 have been run on a real Pi 4 (Raspberry Pi OS Lite 64 bit, Debian 13 "trixie", October 2026): the install works and demo mode sends the four inverter frames. Steps 3, 4 and 7 to 11 need the CAN HAT and wiring and have not been run on hardware yet. The overlay lines come from the Waveshare documentation, so follow the checks after each step.
 
 ## Read this first: safety
 
@@ -44,7 +44,7 @@ On the Pi:
 ```bash
 sudo apt update
 sudo apt full-upgrade -y
-sudo apt install -y python3-venv python3-dev build-essential rsync can-utils git
+sudo apt install -y python3-venv python3-dev build-essential rsync can-utils git swig liblgpio-dev
 sudo reboot
 ```
 
@@ -123,9 +123,10 @@ sudo -u secondpulse /opt/secondpulse/.venv/bin/pip install --upgrade pip
 sudo -u secondpulse /opt/secondpulse/.venv/bin/pip install -r /opt/secondpulse/requirements-gateway.txt
 ```
 
-Check the install:
+Check the install (run it from `/opt/secondpulse`, because `lgpio` creates a small notification file in the current directory and the `secondpulse` user cannot write to your home directory):
 
 ```bash
+cd /opt/secondpulse
 sudo -u secondpulse /opt/secondpulse/.venv/bin/python -c "import can, lgpio; from gpiozero.pins.lgpio import LGPIOFactory; print('imports ok')"
 ```
 
