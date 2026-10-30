@@ -1,0 +1,18 @@
+[Unit]
+Description=SecondPulse CAN gateway
+After=secondpulse-can.service
+Requires=secondpulse-can.service
+
+[Service]
+User=secondpulse
+Group=secondpulse
+SupplementaryGroups=gpio
+WorkingDirectory=/opt/secondpulse
+ExecStart=/opt/secondpulse/.venv/bin/python -m gateway.pi_can_gateway --mode live --require-gpio
+Restart=on-failure
+RestartSec=3
+# If the service stops, the relays are released and fall back to off through their pull downs.
+# Do not rely on this alone, see docs/PI_SETUP.md.
+
+[Install]
+WantedBy=multi-user.target
