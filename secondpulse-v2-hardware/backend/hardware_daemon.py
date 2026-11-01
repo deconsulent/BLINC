@@ -68,10 +68,6 @@ class TelemetryState:
         self.v12_sag: float = 0.0
         self.v5_sag: float = 0.0
 
-        # Optional user overrides (None = autonomous auto-detection)
-        self.user_override_mah_a: Optional[int] = None
-        self.user_override_mah_b: Optional[int] = None
-
         self.name_12v: str = "Primary Battery Port"
         self.chem_12v: str = "4S Li-ion / NMC"
         self.nominal_mah_12v: int = 12000
@@ -136,10 +132,11 @@ state = TelemetryState()
 serial_conn: Optional[serial.Serial] = None
 
 
-def auto_classify_pack(v: float, user_override: Optional[int] = None) -> tuple[str, str, int, float, bool]:
+def auto_classify_pack(v: float) -> tuple[str, str, int, float, bool]:
     """
     Autonomous Classifier: Identifies battery chemistry, form-factor,
     and capacity completely automatically from physical voltage telemetry.
+    No user input or manual capacity selection required.
     """
     if v < MIN_ACTIVE_VOLTAGE_V:
         return "Port Unpopulated (Standby)", "Open Terminal", 0, 0.0, False
@@ -148,15 +145,15 @@ def auto_classify_pack(v: float, user_override: Optional[int] = None) -> tuple[s
         # High-voltage Jump Starter (4S Li-ion / 12V Nom / 16.8V Full)
         name = "Jump Starter Primary Pack"
         chem = "4S Li-ion / NMC (350A/1800A Peak)"
-        mah = user_override if user_override is not None else 12000
-        wh = round((mah * 3.7) / 1000.0, 1) # Standard equivalent Wh = 44.4 Wh for 12k
+        mah = 12000
+        wh = 44.4
         return name, chem, mah, wh, True
     else:
-        # 5V Mobile Power Bank (User's 20,000 mAh Power Bank or Standard Buffer)
+        # 5V Mobile Power Bank (20,000 mAh Dual-Cell Buffer)
         name = "Mobile Power Bank (High-Capacity)"
         chem = "1S2P Li-ion USB (3.0A Dual-Cell Buffer)"
-        mah = user_override if user_override is not None else 20000
-        wh = round((mah * 3.7) / 1000.0, 1) # 20k mAh * 3.7V = 74.0 Wh
+        mah = 20000
+        wh = 74.0
         return name, chem, mah, wh, True
 
 
@@ -322,7 +319,7 @@ def serial_worker():
                     state.v5_baseline = 0.0
 
                 # Autonomous Port-Agnostic Classifier for Channel A
-                name_a, chem_a, mah_a, wh_a, active_a = auto_classify_pack(v12, state.user_override_mah_a)
+                name_a, chem_a, mah_a, wh_a, active_a = auto_classify_pack(v12)
                 nom_v_a = 12.0 if v12 >= 7.5 else 5.0
                 state.name_12v = name_a
                 state.chem_12v = chem_a
@@ -344,7 +341,7 @@ def serial_worker():
                 state.usable_wh_12v = uwh12
 
                 # Autonomous Port-Agnostic Classifier for Channel B
-                name_b, chem_b, mah_b, wh_b, active_b = auto_classify_pack(v5, state.user_override_mah_b)
+                name_b, chem_b, mah_b, wh_b, active_b = auto_classify_pack(v5)
                 nom_v_b = 12.0 if v5 >= 7.5 else 5.0
                 state.name_5v = name_b
                 state.chem_5v = chem_b
@@ -458,7 +455,6 @@ def get_status():
                 "connected": ch_a_connected,
                 "nominal_capacity_mah": state.nominal_mah_12v if ch_a_connected else 0,
                 "nominal_energy_wh": state.nominal_wh_12v if ch_a_connected else 0.0,
-                "configured_mah": state.nominal_mah_12v,
                 "is_12v": state.v12_live >= 7.5,
                 "rated_current_a": 350 if state.v12_live >= 7.5 else 3.0,
                 "peak_current_a": 1800 if state.v12_live >= 7.5 else 3.0,
@@ -487,7 +483,6 @@ def get_status():
                 "connected": ch_b_connected,
                 "nominal_capacity_mah": state.nominal_mah_5v if ch_b_connected else 0,
                 "nominal_energy_wh": state.nominal_wh_5v if ch_b_connected else 0.0,
-                "configured_mah": state.nominal_mah_5v,
                 "is_12v": state.v5_live >= 7.5,
                 "rated_current_a": 350 if state.v5_live >= 7.5 else 3.0,
                 "peak_current_a": 1800 if state.v5_live >= 7.5 else 3.0,
@@ -526,26 +521,6 @@ def get_status():
             },
             "history": state.history[-40:],
         }
-
-
-class ConfigCapacityRequest(BaseModel):
-    channel: str
-    capacity_mah: int
-
-
-@app.post("/api/config_capacity")
-def config_capacity(req: ConfigCapacityRequest):
-    with state.lock:
-        cap = max(500, min(100000, req.capacity_mah))
-        ch = req.channel.lower()
-        if ch in ["cha", "ch_a", "channel_a", "12v", "a"]:
-            state.user_override_mah_a = cap
-            return {"status": "ok", "channel": "cha", "capacity_mah": cap}
-        elif ch in ["chb", "ch_b", "channel_b", "5v", "b"]:
-            state.user_override_mah_b = cap
-            return {"status": "ok", "channel": "chb", "capacity_mah": cap}
-        else:
-            raise HTTPException(status_code=400, detail="Invalid channel. Use 'cha' or 'chb'")
 
 
 class CommandRequest(BaseModel):

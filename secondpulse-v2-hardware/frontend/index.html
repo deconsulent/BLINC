@@ -69,7 +69,7 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            padding: 11px 16px;
+            padding: 12px 18px;
             background-image: 
                 radial-gradient(circle at 12% 15%, var(--bg-ambient-1) 0%, transparent 45%),
                 radial-gradient(circle at 88% 85%, var(--bg-ambient-2) 0%, transparent 45%);
@@ -78,7 +78,7 @@
         .glass-card {
             background: var(--card-bg);
             border: 1px solid var(--card-border);
-            border-radius: 15px;
+            border-radius: 16px;
             backdrop-filter: blur(28px);
             -webkit-backdrop-filter: blur(28px);
             box-shadow: var(--shadow-subtle);
@@ -89,8 +89,8 @@
         .glass-tile {
             background: var(--card-tile-bg);
             border: 1px solid var(--card-tile-border);
-            border-radius: 10px;
-            padding: 8px 11px;
+            border-radius: 11px;
+            padding: 9px 12px;
         }
 
         /* Top Header */
@@ -98,7 +98,7 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 8px;
+            margin-bottom: 9px;
             flex-shrink: 0;
         }
 
@@ -116,7 +116,7 @@
         }
 
         .brand-tag {
-            font-size: 0.69rem;
+            font-size: 0.70rem;
             font-weight: 700;
             color: var(--text-secondary);
             letter-spacing: 0.06em;
@@ -131,7 +131,7 @@
             border: 1px solid rgba(10, 132, 255, 0.25);
             padding: 4px 10px;
             border-radius: 9999px;
-            font-size: 0.71rem;
+            font-size: 0.72rem;
             font-weight: 600;
             color: var(--accent-blue);
         }
@@ -154,8 +154,8 @@
             border: 1px solid var(--btn-border);
             color: var(--text-primary);
             font-weight: 600;
-            font-size: 0.74rem;
-            padding: 5px 12px;
+            font-size: 0.75rem;
+            padding: 6px 13px;
             border-radius: 9999px;
             cursor: pointer;
             display: flex;
@@ -184,7 +184,7 @@
         .theme-opt {
             padding: 4px 10px;
             border-radius: 9999px;
-            font-size: 0.70rem;
+            font-size: 0.71rem;
             font-weight: 600;
             cursor: pointer;
             color: var(--text-secondary);
@@ -199,17 +199,17 @@
         .hero-bar {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
-            gap: 8px;
-            margin-bottom: 8px;
+            gap: 9px;
+            margin-bottom: 9px;
             flex-shrink: 0;
         }
 
         .metric-card {
-            padding: 8px 12px;
+            padding: 9px 13px;
         }
 
         .metric-overline {
-            font-size: 0.64rem;
+            font-size: 0.65rem;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.08em;
@@ -218,7 +218,7 @@
         }
 
         .metric-number {
-            font-size: 1.40rem;
+            font-size: 1.45rem;
             font-weight: 800;
             letter-spacing: -0.03em;
             color: var(--text-primary);
@@ -226,7 +226,7 @@
         }
 
         .metric-sub {
-            font-size: 0.68rem;
+            font-size: 0.70rem;
             color: var(--text-secondary);
             margin-top: 2px;
             font-weight: 500;
@@ -236,13 +236,13 @@
         .channels-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 9px;
-            margin-bottom: 8px;
+            gap: 10px;
+            margin-bottom: 9px;
             flex-shrink: 0;
         }
 
         .channel-card {
-            padding: 11px 15px;
+            padding: 13px 17px;
             transition: all 0.3s ease;
         }
 
@@ -250,69 +250,19 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 6px;
+            margin-bottom: 10px;
         }
 
         .channel-title {
-            font-size: 0.93rem;
+            font-size: 0.96rem;
             font-weight: 700;
             color: var(--text-primary);
         }
 
         .channel-spec {
-            font-size: 0.70rem;
+            font-size: 0.72rem;
             color: var(--text-secondary);
             margin-top: 1px;
-        }
-
-        /* Auto-Classified Specimen Bar */
-        .specimen-selector {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: var(--card-tile-bg);
-            border: 1px solid var(--card-tile-border);
-            border-radius: 8px;
-            padding: 4px 8px;
-            margin-bottom: 8px;
-            font-size: 0.69rem;
-        }
-
-        .specimen-label {
-            font-weight: 600;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .specimen-pills {
-            display: inline-flex;
-            gap: 4px;
-        }
-
-        .spec-pill {
-            background: var(--btn-bg);
-            border: 1px solid var(--btn-border);
-            color: var(--text-secondary);
-            font-size: 0.67rem;
-            font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 9999px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .spec-pill:hover {
-            color: var(--text-primary);
-            background: var(--btn-hover);
-        }
-
-        .spec-pill.active {
-            background: var(--text-primary);
-            color: var(--bg-body);
-            border-color: var(--text-primary);
-            font-weight: 700;
         }
 
         .grade-badge-a {
@@ -322,7 +272,7 @@
             border: 1px solid rgba(48, 209, 88, 0.35);
             color: var(--accent-green);
             font-weight: 700;
-            font-size: 0.69rem;
+            font-size: 0.70rem;
             padding: 3px 9px;
             border-radius: 9999px;
         }
@@ -334,7 +284,7 @@
             border: 1px solid rgba(255, 159, 10, 0.35);
             color: var(--accent-amber);
             font-weight: 700;
-            font-size: 0.69rem;
+            font-size: 0.70rem;
             padding: 3px 9px;
             border-radius: 9999px;
         }
@@ -346,7 +296,7 @@
             border: 1px solid rgba(255, 69, 58, 0.35);
             color: var(--accent-red);
             font-weight: 700;
-            font-size: 0.69rem;
+            font-size: 0.70rem;
             padding: 3px 9px;
             border-radius: 9999px;
         }
@@ -358,7 +308,7 @@
             border: 1px solid var(--btn-border);
             color: var(--text-secondary);
             font-weight: 600;
-            font-size: 0.69rem;
+            font-size: 0.70rem;
             padding: 3px 9px;
             border-radius: 9999px;
         }
@@ -366,12 +316,12 @@
         .stats-4col {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 7px;
-            margin-bottom: 8px;
+            gap: 8px;
+            margin-bottom: 10px;
         }
 
         .stat-num {
-            font-size: 1.20rem;
+            font-size: 1.25rem;
             font-weight: 800;
             letter-spacing: -0.02em;
             color: var(--text-primary);
@@ -379,7 +329,7 @@
         }
 
         .stat-sub {
-            font-size: 0.66rem;
+            font-size: 0.68rem;
             color: var(--text-secondary);
             margin-top: 2px;
         }
@@ -387,12 +337,12 @@
         .safety-bar {
             background: var(--card-tile-bg);
             border: 1px solid var(--card-tile-border);
-            border-radius: 8px;
-            padding: 5px 10px;
+            border-radius: 9px;
+            padding: 6px 11px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            font-size: 0.69rem;
+            font-size: 0.71rem;
         }
 
         .dashed-standby {
@@ -406,7 +356,7 @@
             display: flex;
             flex-direction: column;
             min-height: 0;
-            padding: 8px 14px 6px 14px;
+            padding: 9px 15px 7px 15px;
         }
 
         .waveform-bar {
@@ -414,7 +364,7 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 4px;
-            font-size: 0.72rem;
+            font-size: 0.73rem;
             font-weight: 600;
         }
 
@@ -445,7 +395,7 @@
             </div>
         </div>
 
-        <div style="font-size: 0.72rem; color: var(--text-secondary); display: flex; gap: 8px; align-items: center;">
+        <div style="font-size: 0.73rem; color: var(--text-secondary); display: flex; gap: 8px; align-items: center;">
             <span>Smart Router Contact:</span>
             <strong id="router-state" style="color: var(--accent-green);">Hub Feeder Active</strong>
         </div>
@@ -512,14 +462,6 @@
                 <div class="grade-badge-standby" id="cha-badge">Standby</div>
             </div>
 
-            <!-- Auto-Classified Capacity Presets (Silent Inline Switching) -->
-            <div class="specimen-selector">
-                <span class="specimen-label" id="cha-label">Auto-Identified:</span>
-                <div class="specimen-pills" id="cha-pills">
-                    <!-- Dynamic pills injected by JS based on detected voltage -->
-                </div>
-            </div>
-
             <div class="stats-4col" id="cha-stats">
                 <div class="glass-tile">
                     <div class="metric-overline">Terminal Potential</div>
@@ -562,14 +504,6 @@
                     <div class="channel-spec" id="chb-spec">Awaiting Infeed</div>
                 </div>
                 <div class="grade-badge-standby" id="chb-badge">Standby</div>
-            </div>
-
-            <!-- Auto-Classified Capacity Presets (Silent Inline Switching) -->
-            <div class="specimen-selector">
-                <span class="specimen-label" id="chb-label">Auto-Identified:</span>
-                <div class="specimen-pills" id="chb-pills">
-                    <!-- Dynamic pills injected by JS based on detected voltage -->
-                </div>
             </div>
 
             <div class="stats-4col" id="chb-stats">
@@ -631,7 +565,6 @@
         const apiHost = window.location.hostname || 'localhost';
         const API_URL = 'http://' + apiHost + ':8000';
         let historyBuffer = [];
-        let channelPillState = { cha: null, chb: null };
 
         const canvas = document.getElementById('waveformCanvas');
         const ctx = canvas.getContext('2d');
@@ -704,54 +637,6 @@
             ctx.stroke();
         }
 
-        // Silent inline capacity switcher (Zero popups / zero alerts)
-        async function setCapacity(channel, mah) {
-            try {
-                await fetch(`${API_URL}/api/config_capacity`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ channel: channel, capacity_mah: mah })
-                });
-                fetchStatus();
-            } catch (err) {
-                console.error("Config capacity error:", err);
-            }
-        }
-
-        function renderPills(prefix, is12v, configuredMah) {
-            const container = document.getElementById(`${prefix}-pills`);
-            const labelEl = document.getElementById(`${prefix}-label`);
-            if (!container) return;
-
-            const pillKey = `${is12v ? '12v' : '5v'}_${configuredMah}`;
-            if (channelPillState[prefix] === pillKey) return;
-            channelPillState[prefix] = pillKey;
-
-            if (labelEl) {
-                labelEl.innerText = is12v ? 'Auto-Identified (12V Pack):' : 'Auto-Identified (USB Infeed):';
-            }
-
-            let options = [];
-            if (is12v) {
-                options = [
-                    { mah: 12000, label: '12k (44.4 Wh)' },
-                    { mah: 16000, label: '16k' },
-                    { mah: 24000, label: '24k' }
-                ];
-            } else {
-                options = [
-                    { mah: 10000, label: '10k (37 Wh)' },
-                    { mah: 20000, label: '20k (74 Wh)' },
-                    { mah: 30000, label: '30k' }
-                ];
-            }
-
-            container.innerHTML = options.map(opt => {
-                const isActive = opt.mah === configuredMah;
-                return `<button class="spec-pill ${isActive ? 'active' : ''}" onclick="setCapacity('${prefix}', ${opt.mah})">${opt.label}</button>`;
-            }).join('');
-        }
-
         function updateChannelUI(prefix, chData) {
             const card = document.getElementById(`card-${prefix}`);
             const titleEl = document.getElementById(`${prefix}-title`);
@@ -771,10 +656,6 @@
 
             const isConn = chData && chData.connected;
             const liveV = (chData && chData.voltage_live) ? chData.voltage_live : 0.0;
-            const is12v = chData && chData.is_12v;
-            const configuredMah = (chData && chData.configured_mah) ? chData.configured_mah : (is12v ? 12000 : 20000);
-
-            renderPills(prefix, is12v, configuredMah);
 
             if (voltEl) voltEl.innerHTML = `${liveV.toFixed(2)} <span style="font-size: 0.75rem; font-weight: 500;">V</span>`;
 
