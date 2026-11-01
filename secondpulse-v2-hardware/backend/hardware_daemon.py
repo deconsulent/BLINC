@@ -71,6 +71,17 @@ class TelemetryState:
         self.v12_sag: float = 0.0
         self.v5_sag: float = 0.0
 
+        # Dynamic pack auto-identification
+        self.name_12v: str = "Primary Battery Port"
+        self.chem_12v: str = "4S Li-ion / NMC"
+        self.nominal_mah_12v: int = 12000
+        self.nominal_wh_12v: float = 44.4
+
+        self.name_5v: str = "Secondary Buffer Port"
+        self.chem_5v: str = "1S Li-ion USB"
+        self.nominal_mah_5v: int = 10000
+        self.nominal_wh_5v: float = 37.0
+
         # Dynamic Internal Resistance & SOH (with Specimen Latch)
         self.ir_12v_mohm: float = 28.5
         self.ir_5v_mohm: float = 0.0
@@ -249,9 +260,17 @@ def serial_worker():
                 if not load5 and v5 > 1.0:
                     state.v5_baseline = v5 if state.v5_baseline < 1.0 else (0.92 * state.v5_baseline + 0.08 * v5)
 
-                # Compute physics for Channel A (12V Pack: 44.4 Wh nominal)
+                # Auto-detect battery type on Channel A from live voltage
+                nom_v_a = 12.0 if v12 >= 7.5 else 5.0
+                cap_wh_a = 44.4 if v12 >= 7.5 else 37.0
+                state.name_12v = "Jump Starter Primary Pack" if v12 >= 7.5 else "Mobile Power Bank (Port A)"
+                state.chem_12v = "4S Li-ion / NMC (350A/1800A Peak)" if v12 >= 7.5 else "1S Li-ion USB (2.4A)"
+                state.nominal_mah_12v = 12000 if v12 >= 7.5 else 10000
+                state.nominal_wh_12v = cap_wh_a
+
+                # Compute physics for Channel A
                 sag12, ir12, soh12, grade12, safety12, rt12, cyc12, uwh12, active12 = compute_live_physics(
-                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, 12.0, 44.4
+                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, nom_v_a, cap_wh_a
                 )
                 state.v12_sag = sag12
                 state.ir_12v_mohm = ir12
@@ -263,9 +282,17 @@ def serial_worker():
                 state.cycles_12v = cyc12
                 state.usable_wh_12v = uwh12
 
-                # Compute physics for Channel B (5V Buffer: 37.0 Wh nominal)
+                # Auto-detect battery type on Channel B from live voltage
+                nom_v_b = 12.0 if v5 >= 7.5 else 5.0
+                cap_wh_b = 44.4 if v5 >= 7.5 else 37.0
+                state.name_5v = "Jump Starter Pack (Port B)" if v5 >= 7.5 else "Mobile Power Bank Buffer"
+                state.chem_5v = "4S Li-ion / NMC (350A/1800A Peak)" if v5 >= 7.5 else "1S Li-ion USB (2.4A)"
+                state.nominal_mah_5v = 12000 if v5 >= 7.5 else 10000
+                state.nominal_wh_5v = cap_wh_b
+
+                # Compute physics for Channel B
                 sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5, active5 = compute_live_physics(
-                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, 5.0, 37.0
+                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, nom_v_b, cap_wh_b
                 )
                 state.v5_sag = sag5
                 state.ir_5v_mohm = ir5
@@ -332,8 +359,8 @@ def get_status():
         ch_a_connected = state.v12_live >= MIN_ACTIVE_VOLTAGE_V
         ch_b_connected = state.v5_live >= MIN_ACTIVE_VOLTAGE_V
         conn_count = (1 if ch_a_connected else 0) + (1 if ch_b_connected else 0)
-        total_nominal_wh = (44.4 if ch_a_connected else 0.0) + (37.0 if ch_b_connected else 0.0)
-        total_nominal_mah = (12000 if ch_a_connected else 0) + (10000 if ch_b_connected else 0)
+        total_nominal_wh = (state.nominal_wh_12v if ch_a_connected else 0.0) + (state.nominal_wh_5v if ch_b_connected else 0.0)
+        total_nominal_mah = (state.nominal_mah_12v if ch_a_connected else 0) + (state.nominal_mah_5v if ch_b_connected else 0)
         total_usable_wh = (state.usable_wh_12v if ch_a_connected else 0.0) + (state.usable_wh_5v if ch_b_connected else 0.0)
         
         return {
@@ -350,13 +377,13 @@ def get_status():
                 "aggregate_health_pct": round((total_usable_wh / total_nominal_wh * 100.0), 1) if total_nominal_wh > 0 else 0.0,
             },
             "channel_a_12v": {
-                "name": "Jump Starter Primary Pack",
+                "name": state.name_12v,
                 "connected": ch_a_connected,
-                "nominal_capacity_mah": 12000 if ch_a_connected else 0,
-                "nominal_energy_wh": 44.4 if ch_a_connected else 0.0,
-                "rated_current_a": 350,
-                "peak_current_a": 1800,
-                "chemistry": "4S Li-ion / NMC",
+                "nominal_capacity_mah": state.nominal_mah_12v if ch_a_connected else 0,
+                "nominal_energy_wh": state.nominal_wh_12v if ch_a_connected else 0.0,
+                "rated_current_a": 350 if state.nominal_mah_12v == 12000 else 2.4,
+                "peak_current_a": 1800 if state.nominal_mah_12v == 12000 else 3.0,
+                "chemistry": state.chem_12v,
                 "voltage_live": state.v12_live,
                 "voltage_baseline": round(state.v12_baseline, 3),
                 "voltage_sag": state.v12_sag if ch_a_connected else 0.0,
@@ -377,13 +404,13 @@ def get_status():
                 "load_active": state.load12_active,
             },
             "channel_b_5v": {
-                "name": "Mobile Power Bank Buffer",
+                "name": state.name_5v,
                 "connected": ch_b_connected,
-                "nominal_capacity_mah": 10000 if ch_b_connected else 0,
-                "nominal_energy_wh": 37.0 if ch_b_connected else 0.0,
-                "rated_current_a": 2.4,
-                "peak_current_a": 3.0,
-                "chemistry": "1S Li-ion USB",
+                "nominal_capacity_mah": state.nominal_mah_5v if ch_b_connected else 0,
+                "nominal_energy_wh": state.nominal_wh_5v if ch_b_connected else 0.0,
+                "rated_current_a": 350 if state.nominal_mah_5v == 12000 else 2.4,
+                "peak_current_a": 1800 if state.nominal_mah_5v == 12000 else 3.0,
+                "chemistry": state.chem_5v,
                 "voltage_live": state.v5_live,
                 "voltage_baseline": round(state.v5_baseline, 3),
                 "voltage_sag": state.v5_sag if ch_b_connected else 0.0,

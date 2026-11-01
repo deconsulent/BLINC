@@ -529,8 +529,8 @@ html_app = """
         <div class="glass-card channel-card dashed-standby" id="card-chb">
             <div class="channel-header">
                 <div>
-                    <div class="channel-title" style="color: var(--text-secondary);">Channel B • Secondary Buffer Input</div>
-                    <div class="channel-spec">Mobile Power Bank • 10,000 mAh • 37.0 Wh (1S USB Buffer)</div>
+                    <div class="channel-title" id="chb-title">Channel B • Secondary Buffer Input</div>
+                    <div class="channel-spec" id="chb-spec">Mobile Power Bank • 10,000 mAh • 37.0 Wh (1S USB Buffer)</div>
                 </div>
                 <div class="grade-badge-standby" id="chb-badge">Port Inactive</div>
             </div>
@@ -544,7 +544,7 @@ html_app = """
                 <div class="glass-tile">
                     <div class="metric-overline">State of Health</div>
                     <div class="stat-num" id="chb-soh">— <span style="font-size: 0.8rem; font-weight: 500;">%</span></div>
-                    <div class="stat-sub">0.0 Wh Usable</div>
+                    <div class="stat-sub" id="chb-uwh">0.0 Wh Usable</div>
                 </div>
                 <div class="glass-tile">
                     <div class="metric-overline">Internal Impedance</div>
@@ -554,17 +554,17 @@ html_app = """
                 <div class="glass-tile">
                     <div class="metric-overline">Discharge Runtime</div>
                     <div class="stat-num" id="chb-runtime">— <span style="font-size: 0.8rem; font-weight: 500;">hrs</span></div>
-                    <div class="stat-sub">Standby</div>
+                    <div class="stat-sub" id="chb-cycles">Standby</div>
                 </div>
             </div>
 
             <div class="safety-bar" style="opacity: 0.7;">
                 <div>
                     <span style="color: var(--text-secondary); font-weight: 600;">Port Status:</span>
-                    <strong style="color: var(--text-secondary); margin-left: 6px;">PORT UNPOPULATED (DISCONNECTED)</strong>
+                    <strong style="color: var(--text-secondary); margin-left: 6px;" id="chb-safety-text">PORT UNPOPULATED (DISCONNECTED)</strong>
                 </div>
                 <div style="color: var(--text-secondary);">
-                    Galvanic Isolation: <strong>Engaged</strong> • Power Draw: <strong>0.00 W</strong>
+                    Thermal Risk: <strong id="chb-thermal">SAFE (OFFLINE)</strong> • State: <strong id="chb-isolation">Engaged</strong>
                 </div>
             </div>
         </div>
@@ -708,19 +708,21 @@ html_app = """
                     safety: cha.safety
                 } : lastKnownSpecimen) : null;
 
-                // Render Top Bar Metrics
-                if (display) {
-                    document.getElementById('m-capacity').innerHTML = `12,000 <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">mAh</span>`;
-                    document.getElementById('m-capacity-sub').innerText = `44.4 Wh Nominal • 1 Pack Active`;
-                    document.getElementById('m-soh').innerHTML = `${display.soh.toFixed(1)}<span style="font-size: 0.95rem; font-weight: 600;">%</span>`;
-                    document.getElementById('m-soh-sub').innerText = `${display.uwh.toFixed(1)} Wh Usable Clean Energy`;
+                // Top Metrics Bar directly from backend real-time calculations
+                const totalMah = sys.total_nominal_mah || 0;
+                const totalWh = sys.total_nominal_wh || 0.0;
+                const totalUsable = sys.total_usable_wh || 0.0;
+                const aggHealth = sys.aggregate_health_pct || 0.0;
+                const connCount = sys.connected_batteries || 0;
 
-                    const c2g = (display.uwh / 1000.0) * 72.0;
-                    const c2grave = (display.uwh / 1000.0) * 850.0;
-                    const sav = (display.uwh / 1000.0) * (165.0 - 63.0);
-                    document.getElementById('m-c2gate').innerHTML = `${c2g.toFixed(2)} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">kg CO₂e</span>`;
-                    document.getElementById('m-c2grave').innerHTML = `${c2grave.toFixed(1)} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">g</span>`;
-                    document.getElementById('m-savings').innerText = `€ ${sav.toFixed(2)}`;
+                if (connCount > 0) {
+                    document.getElementById('m-capacity').innerHTML = `${totalMah.toLocaleString()} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">mAh</span>`;
+                    document.getElementById('m-capacity-sub').innerText = `${totalWh.toFixed(1)} Wh Nominal • ${connCount} Pack(s) Active`;
+                    document.getElementById('m-soh').innerHTML = `${aggHealth.toFixed(1)}<span style="font-size: 0.95rem; font-weight: 600;">%</span>`;
+                    document.getElementById('m-soh-sub').innerText = `${totalUsable.toFixed(1)} Wh Usable Clean Energy`;
+                    document.getElementById('m-c2gate').innerHTML = `${(lca.cradle_to_gate_kg_co2 || 0).toFixed(2)} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">kg CO₂e</span>`;
+                    document.getElementById('m-c2grave').innerHTML = `${(lca.critical_minerals_preserved_g || 0).toFixed(1)} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">g</span>`;
+                    document.getElementById('m-savings').innerText = `€ ${(lca.capital_saved_eur || 0).toFixed(2)}`;
                 } else {
                     document.getElementById('m-capacity').innerHTML = `0 <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">mAh</span>`;
                     document.getElementById('m-capacity-sub').innerText = `0.0 Wh • No Voltage Infeed`;
@@ -732,25 +734,32 @@ html_app = """
                 }
 
                 // Render Channel A
+                const v12 = cha.voltage_live || 0.0;
+                const isChaActive = cha.connected || false;
                 document.getElementById('cha-volt').innerHTML = `${v12.toFixed(2)} <span style="font-size: 0.8rem; font-weight: 500;">V</span>`;
-                if (display) {
+
+                if (isChaActive) {
+                    document.getElementById('card-cha').classList.remove('dashed-standby');
+                    document.getElementById('cha-spec').innerText = `${cha.name || 'Primary Battery'} • ${(cha.nominal_capacity_mah || 12000).toLocaleString()} mAh • ${(cha.nominal_energy_wh || 44.4).toFixed(1)} Wh (${cha.chemistry || 'Li-ion'})`;
                     document.getElementById('cha-badge').className = 'grade-badge-a';
-                    document.getElementById('cha-badge').innerText = display.grade || 'Grade A: Whole-Pack Second-Life';
-                    document.getElementById('cha-sag').innerText = isChaActive ? (cha.voltage_sag > 0 ? `-${cha.voltage_sag.toFixed(2)}V Load Sag` : 'Active Infeed') : 'Latched Specimen';
-                    document.getElementById('cha-soh').innerHTML = `${display.soh.toFixed(1)}<span style="font-size: 0.8rem; font-weight: 500;">%</span>`;
-                    document.getElementById('cha-uwh').innerText = `${display.uwh.toFixed(1)} Wh Usable`;
-                    document.getElementById('cha-ir').innerHTML = `${display.ir.toFixed(1)} <span style="font-size: 0.8rem; font-weight: 500;">mΩ</span>`;
-                    document.getElementById('cha-runtime').innerHTML = `${display.runtime.toFixed(1)} <span style="font-size: 0.8rem; font-weight: 500;">hrs</span>`;
-                    document.getElementById('cha-cycles').innerText = `~${display.cycles.toLocaleString()} stationary cycles`;
+                    document.getElementById('cha-badge').innerText = cha.grade || 'Grade A: Whole-Pack';
+                    document.getElementById('cha-sag').innerText = cha.voltage_sag > 0 ? `-${cha.voltage_sag.toFixed(2)}V Load Sag` : 'Active Infeed';
+                    document.getElementById('cha-soh').innerHTML = `${(cha.soh_pct || 0).toFixed(1)}<span style="font-size: 0.8rem; font-weight: 500;">%</span>`;
+                    document.getElementById('cha-uwh').innerText = `${(cha.usable_wh || 0).toFixed(1)} Wh Usable`;
+                    document.getElementById('cha-ir').innerHTML = `${(cha.internal_resistance_mohm || 0).toFixed(1)} <span style="font-size: 0.8rem; font-weight: 500;">mΩ</span>`;
+                    document.getElementById('cha-runtime').innerHTML = `${(cha.runtime_hours || 0).toFixed(1)} <span style="font-size: 0.8rem; font-weight: 500;">hrs</span>`;
+                    document.getElementById('cha-cycles').innerText = `~${(cha.cycles_remaining || 0).toLocaleString()} stationary cycles`;
                     document.getElementById('cha-safety').style.color = 'var(--accent-green)';
-                    document.getElementById('cha-safety').innerText = display.safety?.status || 'PASS: ALL PARAMETERS NOMINAL';
+                    document.getElementById('cha-safety').innerText = cha.safety?.status || 'PASS: ALL PARAMETERS NOMINAL';
                     document.getElementById('cha-thermal').style.color = 'var(--accent-green)';
-                    document.getElementById('cha-thermal').innerText = display.safety?.thermal_runaway_risk || 'VERY LOW / SAFE';
-                    document.getElementById('cha-impedance').innerText = `${display.ir.toFixed(1)} mΩ (Nominal)`;
+                    document.getElementById('cha-thermal').innerText = cha.safety?.thermal_runaway_risk || 'VERY LOW / SAFE';
+                    document.getElementById('cha-impedance').innerText = cha.safety?.impedance_state || `${(cha.internal_resistance_mohm || 0).toFixed(1)} mΩ (Nominal)`;
                 } else {
+                    document.getElementById('card-cha').classList.add('dashed-standby');
+                    document.getElementById('cha-spec').innerText = 'Jump Starter / Primary Pack • 12,000 mAh • 44.4 Wh (Awaiting Infeed)';
                     document.getElementById('cha-badge').className = 'grade-badge-standby';
                     document.getElementById('cha-badge').innerText = 'Standby (0.00 V)';
-                    document.getElementById('cha-sag').innerText = 'Resting';
+                    document.getElementById('cha-sag').innerText = 'Open Terminal';
                     document.getElementById('cha-soh').innerHTML = `— <span style="font-size: 0.8rem; font-weight: 500;">%</span>`;
                     document.getElementById('cha-uwh').innerText = '0.0 Wh Usable';
                     document.getElementById('cha-ir').innerHTML = `— <span style="font-size: 0.8rem; font-weight: 500;">mΩ</span>`;
@@ -761,6 +770,43 @@ html_app = """
                     document.getElementById('cha-thermal').style.color = 'var(--text-secondary)';
                     document.getElementById('cha-thermal').innerText = 'SAFE (OFFLINE)';
                     document.getElementById('cha-impedance').innerText = 'OPEN CIRCUIT';
+                }
+
+                // Render Channel B (5V Mobile Power Bank Buffer)
+                const v5 = chb.voltage_live || 0.0;
+                const isChbActive = chb.connected || false;
+                document.getElementById('chb-volt').innerHTML = `${v5.toFixed(2)} <span style="font-size: 0.8rem; font-weight: 500;">V</span>`;
+
+                if (isChbActive) {
+                    document.getElementById('card-chb').classList.remove('dashed-standby');
+                    document.getElementById('card-chb').querySelector('.stats-4col').style.opacity = '1.0';
+                    document.getElementById('chb-title').innerText = chb.name || 'Channel B • Secondary Buffer Input';
+                    document.getElementById('chb-spec').innerText = `${chb.name || 'Mobile Power Bank'} • ${(chb.nominal_capacity_mah || 10000).toLocaleString()} mAh • ${(chb.nominal_energy_wh || 37.0).toFixed(1)} Wh (${chb.chemistry || '1S Li-ion USB'})`;
+                    document.getElementById('chb-badge').className = 'grade-badge-a';
+                    document.getElementById('chb-badge').innerText = chb.grade || 'Grade A: Buffer Storage';
+                    document.getElementById('chb-soh').innerHTML = `${(chb.soh_pct || 0).toFixed(1)}<span style="font-size: 0.8rem; font-weight: 500;">%</span>`;
+                    document.getElementById('chb-uwh').innerText = `${(chb.usable_wh || 0).toFixed(1)} Wh Usable`;
+                    document.getElementById('chb-ir').innerHTML = `${(chb.internal_resistance_mohm || 0).toFixed(1)} <span style="font-size: 0.8rem; font-weight: 500;">mΩ</span>`;
+                    document.getElementById('chb-runtime').innerHTML = `${(chb.runtime_hours || 0).toFixed(1)} <span style="font-size: 0.8rem; font-weight: 500;">hrs</span>`;
+                    document.getElementById('chb-cycles').innerText = `~${(chb.cycles_remaining || 0).toLocaleString()} stationary cycles`;
+                    document.getElementById('chb-safety-text').style.color = 'var(--accent-green)';
+                    document.getElementById('chb-safety-text').innerText = chb.safety?.status || 'PASS: ALL PARAMETERS NOMINAL';
+                    document.getElementById('chb-thermal').innerText = chb.safety?.thermal_runaway_risk || 'VERY LOW / SAFE';
+                    document.getElementById('chb-isolation').innerText = 'Buffer Connected';
+                } else {
+                    document.getElementById('card-chb').classList.add('dashed-standby');
+                    document.getElementById('card-chb').querySelector('.stats-4col').style.opacity = '0.55';
+                    document.getElementById('chb-badge').className = 'grade-badge-standby';
+                    document.getElementById('chb-badge').innerText = 'Port Inactive';
+                    document.getElementById('chb-soh').innerHTML = `— <span style="font-size: 0.8rem; font-weight: 500;">%</span>`;
+                    document.getElementById('chb-uwh').innerText = '0.0 Wh Usable';
+                    document.getElementById('chb-ir').innerHTML = `— <span style="font-size: 0.8rem; font-weight: 500;">mΩ</span>`;
+                    document.getElementById('chb-runtime').innerHTML = `— <span style="font-size: 0.8rem; font-weight: 500;">hrs</span>`;
+                    document.getElementById('chb-cycles').innerText = 'Standby';
+                    document.getElementById('chb-safety-text').style.color = 'var(--text-secondary)';
+                    document.getElementById('chb-safety-text').innerText = 'PORT UNPOPULATED (DISCONNECTED)';
+                    document.getElementById('chb-thermal').innerText = 'SAFE (OFFLINE)';
+                    document.getElementById('chb-isolation').innerText = 'Engaged';
                 }
 
                 // Render History Waveform
