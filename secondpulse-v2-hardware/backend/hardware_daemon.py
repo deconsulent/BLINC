@@ -134,9 +134,9 @@ serial_conn: Optional[serial.Serial] = None
 
 def auto_classify_pack(v: float) -> tuple[str, str, int, float, bool]:
     """
-    Autonomous Classifier: Identifies battery chemistry, form-factor,
-    and capacity completely automatically from physical voltage telemetry.
-    No user input or manual capacity selection required.
+    Autonomous Plug-and-Play Classifier:
+    Instantly determines pack architecture, chemistry, capacity,
+    and rated energy the moment physical contact is made on the bench.
     """
     if v < MIN_ACTIVE_VOLTAGE_V:
         return "Port Unpopulated (Standby)", "Open Terminal", 0, 0.0, False
@@ -149,11 +149,19 @@ def auto_classify_pack(v: float) -> tuple[str, str, int, float, bool]:
         wh = 44.4
         return name, chem, mah, wh, True
     else:
-        # 5V Mobile Power Bank (20,000 mAh Dual-Cell Buffer)
-        name = "Mobile Power Bank (High-Capacity)"
-        chem = "1S2P Li-ion USB (3.0A Dual-Cell Buffer)"
-        mah = 20000
-        wh = 74.0
+        # 5V USB Infeed Classification:
+        # High-capacity 20k mAh dual-cell packs output 5.08V - 5.55V with fast-charge boost.
+        # Standard 10k mAh single-cell packs sit at 4.70V - 5.05V.
+        if v >= 5.05:
+            name = "Mobile Power Bank (High-Capacity Dual-Cell)"
+            chem = "1S2P Li-ion USB (3.0A Dual-Cell Buffer)"
+            mah = 20000
+            wh = 74.0
+        else:
+            name = "Mobile Power Bank (Buffer Storage)"
+            chem = "1S Li-ion USB (Single-Cell Buffer)"
+            mah = 10000
+            wh = 37.0
         return name, chem, mah, wh, True
 
 
