@@ -20,7 +20,8 @@ Write-Host ""
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (Test-Path "$ScriptDir\secondpulse-v2-hardware") {
     $WorkDir = "$ScriptDir\secondpulse-v2-hardware"
-} else {
+}
+else {
     $WorkDir = $ScriptDir
 }
 Set-Location $WorkDir
@@ -41,7 +42,8 @@ $DetectedPort = & python -c "import serial.tools.list_ports; all_p = serial.tool
 if ($DetectedPort -and $DetectedPort -ne "NONE") {
     $TargetPort = $DetectedPort.Trim()
     Write-Host " [OK] Hardware Serial Port Bound: $TargetPort at $($Baud) baud" -ForegroundColor Green
-} else {
+}
+else {
     $TargetPort = $Port
     Write-Host " [i] Target Serial Port: $TargetPort at $($Baud) baud" -ForegroundColor Cyan
     Write-Host "     (Daemon will automatically attach when ESP32-S3 is plugged in)" -ForegroundColor Gray
@@ -55,7 +57,8 @@ Write-Host " [*] Ensuring network ports 8000 and 8501 are available..." -Foregro
 Get-NetTCPConnection -LocalPort 8000, 8501 -ErrorAction SilentlyContinue | ForEach-Object {
     try {
         Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
-    } catch {}
+    }
+    catch {}
 }
 
 # Launch FastAPI Hardware Daemon (Port 8000)
@@ -78,12 +81,14 @@ for ($i = 0; $i -lt $MaxRetries; $i++) {
             $Online = $true
             break
         }
-    } catch {}
+    }
+    catch {}
 }
 
 if ($Online) {
     Write-Host " [OK] BLINC Core Daemon Online & Operational!" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host " [i] Hardware daemon starting up in background..." -ForegroundColor Yellow
 }
 
@@ -110,7 +115,8 @@ try {
         }
         Start-Sleep -Seconds 2
     }
-} finally {
+}
+finally {
     Write-Host ""
     Write-Host " [*] Shutting down BLINC services..." -ForegroundColor Yellow
     if ($BackendJob -and -not $BackendJob.HasExited) {

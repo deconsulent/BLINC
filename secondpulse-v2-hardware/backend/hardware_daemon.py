@@ -68,53 +68,53 @@ class TelemetryState:
         self.v12_sag: float = 0.0
         self.v5_sag: float = 0.0
 
-        self.name_12v: str = "Primary Battery Port"
-        self.chem_12v: str = "4S Li-ion / NMC"
-        self.nominal_mah_12v: int = 12000
-        self.nominal_wh_12v: float = 44.4
+        self.name_12v: str = "Port Unpopulated (Standby)"
+        self.chem_12v: str = "Open Terminal"
+        self.nominal_mah_12v: int = 0
+        self.nominal_wh_12v: float = 0.0
 
-        self.name_5v: str = "Secondary Battery Port"
-        self.chem_5v: str = "1S2P Li-ion USB"
-        self.nominal_mah_5v: int = 20000
-        self.nominal_wh_5v: float = 74.0
+        self.name_5v: str = "Port Unpopulated (Standby)"
+        self.chem_5v: str = "Open Terminal"
+        self.nominal_mah_5v: int = 0
+        self.nominal_wh_5v: float = 0.0
 
         # Dynamic Internal Resistance & SOH
-        self.ir_12v_mohm: float = 28.5
-        self.ir_5v_mohm: float = 22.0
-        self.soh_12v: float = 98.4
-        self.soh_5v: float = 96.5
-        self.grade_12v: str = "Grade A: Whole-Pack Second-Life"
-        self.grade_5v: str = "Grade A: Whole-Pack Micro-Buffer"
-        self.tier_12v: str = "Grade A"
-        self.tier_5v: str = "Grade A"
+        self.ir_12v_mohm: float = 0.0
+        self.ir_5v_mohm: float = 0.0
+        self.soh_12v: float = 0.0
+        self.soh_5v: float = 0.0
+        self.grade_12v: str = "Port Unpopulated"
+        self.grade_5v: str = "Port Unpopulated"
+        self.tier_12v: str = "Standby"
+        self.tier_5v: str = "Standby"
 
         # Health, Runtime & Safety
         self.safety_12v: Dict = {
-            "status": "PASS: ALL PARAMETERS NOMINAL",
-            "voltage_integrity": "STABLE",
-            "thermal_runaway_risk": "VERY LOW / SAFE",
-            "impedance_state": "28.5 mΩ (Nominal)",
-            "safe_to_operate": True
+            "status": "PORT UNPOPULATED (DISCONNECTED)",
+            "voltage_integrity": "NO VOLTAGE DETECTED",
+            "thermal_runaway_risk": "SAFE (OFFLINE)",
+            "impedance_state": "OPEN CIRCUIT",
+            "safe_to_operate": False
         }
         self.safety_5v: Dict = {
-            "status": "PASS: ALL PARAMETERS NOMINAL",
-            "voltage_integrity": "STABLE",
-            "thermal_runaway_risk": "VERY LOW / SAFE",
-            "impedance_state": "22.0 mΩ (Nominal)",
-            "safe_to_operate": True
+            "status": "PORT UNPOPULATED (DISCONNECTED)",
+            "voltage_integrity": "NO VOLTAGE DETECTED",
+            "thermal_runaway_risk": "SAFE (OFFLINE)",
+            "impedance_state": "OPEN CIRCUIT",
+            "safe_to_operate": False
         }
-        self.runtime_12v_hours: float = 4.4
-        self.runtime_5v_hours: float = 7.1
-        self.cycles_12v: int = 3264
-        self.cycles_5v: int = 3102
-        self.usable_wh_12v: float = 43.7
-        self.usable_wh_5v: float = 71.4
+        self.runtime_12v_hours: float = 0.0
+        self.runtime_5v_hours: float = 0.0
+        self.cycles_12v: int = 0
+        self.cycles_5v: int = 0
+        self.usable_wh_12v: float = 0.0
+        self.usable_wh_5v: float = 0.0
 
         # Relays
         self.load12_active: bool = False
         self.load5_active: bool = False
-        self.router_active: bool = True
-        self.recommendation: str = "Hub Feeder Active"
+        self.router_active: bool = False
+        self.recommendation: str = "Router Standby (No Infeed Detected)"
 
         # Real-time Cradle to Gate and Grave LCA
         self.cradle_to_gate_kg: float = 0.0
@@ -122,7 +122,7 @@ class TelemetryState:
         self.critical_minerals_g: float = 0.0
         self.total_avoided_co2e_kg: float = 0.0
         self.total_cost_saved_eur: float = 0.0
-        self.total_saving_pct: float = 61.8
+        self.total_saving_pct: float = 0.0
 
         self.history: List[Dict] = []
         self.last_raw_line: str = ""
@@ -132,26 +132,29 @@ state = TelemetryState()
 serial_conn: Optional[serial.Serial] = None
 
 
+def is_valid_pack_voltage(v: float) -> bool:
+    """True only if voltage matches a real physical battery chemistry (10.5V-17.5V for 12V 4S NMC or 4.40V-5.45V for 5V USB)."""
+    return (10.5 <= v <= 17.5) or (4.40 <= v <= 5.45)
+
+
 def auto_classify_pack(v: float) -> tuple[str, str, int, float, bool]:
     """
     Autonomous Plug-and-Play Classifier:
     Instantly determines pack architecture, chemistry, capacity,
     and rated energy the moment physical contact is made on the bench.
+    Floating residual voltages, open circuits, and decay ramps are strictly rejected.
     """
-    if v < MIN_ACTIVE_VOLTAGE_V:
-        return "Port Unpopulated (Standby)", "Open Terminal", 0, 0.0, False
-
-    if v >= 7.5:
+    if 10.5 <= v <= 17.5:
         # High-voltage Jump Starter (4S Li-ion / 12V Nom / 16.8V Full)
         name = "Jump Starter Primary Pack"
         chem = "4S Li-ion / NMC (350A/1800A Peak)"
         mah = 12000
         wh = 44.4
         return name, chem, mah, wh, True
-    else:
+    elif 4.40 <= v <= 5.45:
         # 5V USB Infeed Classification:
-        # High-capacity 20k mAh dual-cell packs output 5.08V - 5.55V with fast-charge boost.
-        # Standard 10k mAh single-cell packs sit at 4.70V - 5.05V.
+        # High-capacity 20k mAh dual-cell packs output 5.05V - 5.45V with fast-charge boost.
+        # Standard 10k mAh single-cell packs sit at 4.40V - 5.04V.
         if v >= 5.05:
             name = "Mobile Power Bank (High-Capacity Dual-Cell)"
             chem = "1S2P Li-ion USB (3.0A Dual-Cell Buffer)"
@@ -163,6 +166,9 @@ def auto_classify_pack(v: float) -> tuple[str, str, int, float, bool]:
             mah = 10000
             wh = 37.0
         return name, chem, mah, wh, True
+    else:
+        # Any other voltage is an open terminal, floating charge, or disconnected
+        return "Port Unpopulated (Standby)", "Open Terminal", 0, 0.0, False
 
 
 def compute_live_physics(
@@ -175,7 +181,7 @@ def compute_live_physics(
     rated_mah: int = 10000
 ) -> tuple[float, float, float, str, dict, float, int, float, bool]:
     """Compute physical IR, SOH, Grade A/B/C, Safety checks, and runtime strictly in real time from live telemetry."""
-    if v_live < MIN_ACTIVE_VOLTAGE_V:
+    if not is_valid_pack_voltage(v_live):
         safety = {
             "status": "PORT UNPOPULATED (DISCONNECTED)",
             "voltage_integrity": "NO VOLTAGE DETECTED",
@@ -383,8 +389,8 @@ def serial_worker():
                 state.usable_wh_5v = uwh5
 
                 # Cradle-to-Gate & Cradle-to-Grave Real-Time LCA Model (Only Active Connected Specimen)
-                ch_a_conn = v12 >= MIN_ACTIVE_VOLTAGE_V
-                ch_b_conn = v5 >= MIN_ACTIVE_VOLTAGE_V
+                ch_a_conn = is_valid_pack_voltage(v12)
+                ch_b_conn = is_valid_pack_voltage(v5)
                 active_usable_wh = (state.usable_wh_12v if ch_a_conn else 0.0) + (state.usable_wh_5v if ch_b_conn else 0.0)
                 total_usable_kwh = active_usable_wh / 1000.0
 
@@ -450,8 +456,8 @@ def get_dashboard():
 @app.get("/api/status")
 def get_status():
     with state.lock:
-        ch_a_connected = state.v12_live >= MIN_ACTIVE_VOLTAGE_V
-        ch_b_connected = state.v5_live >= MIN_ACTIVE_VOLTAGE_V
+        ch_a_connected = is_valid_pack_voltage(state.v12_live)
+        ch_b_connected = is_valid_pack_voltage(state.v5_live)
         conn_count = (1 if ch_a_connected else 0) + (1 if ch_b_connected else 0)
         total_nominal_wh = (state.nominal_wh_12v if ch_a_connected else 0.0) + (state.nominal_wh_5v if ch_b_connected else 0.0)
         total_nominal_mah = (state.nominal_mah_12v if ch_a_connected else 0) + (state.nominal_mah_5v if ch_b_connected else 0)
