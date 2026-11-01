@@ -279,10 +279,22 @@ def serial_worker():
     global serial_conn
     while True:
         if not state.connected:
-            ports = [p.device for p in serial.tools.list_ports.comports()]
+            all_ports = serial.tools.list_ports.comports()
+            port_names = [p.device for p in all_ports]
             target_port = SERIAL_PORT
-            if target_port not in ports and ports:
-                target_port = ports[0]
+
+            if target_port not in port_names:
+                # Find real USB serial ports, skipping virtual Bluetooth serial links
+                usb_ports = [
+                    p.device for p in all_ports 
+                    if "bluetooth" not in p.description.lower() and "bth" not in (p.hwid or "").lower()
+                ]
+                if usb_ports:
+                    target_port = usb_ports[0]
+                else:
+                    state.connected = False
+                    time.sleep(1.0)
+                    continue
 
             try:
                 serial_conn = serial.Serial(target_port, BAUD_RATE, timeout=1.0)
