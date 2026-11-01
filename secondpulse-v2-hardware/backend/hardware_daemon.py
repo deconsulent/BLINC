@@ -73,13 +73,13 @@ class TelemetryState:
 
         # Dynamic Internal Resistance & SOH (with Specimen Latch)
         self.ir_12v_mohm: float = 28.5
-        self.ir_5v_mohm: float = 42.0
+        self.ir_5v_mohm: float = 0.0
         self.soh_12v: float = 97.4
-        self.soh_5v: float = 92.0
+        self.soh_5v: float = 0.0
         self.grade_12v: str = "Grade A: Whole-Pack Second-Life (Grid Solar Storage)"
-        self.grade_5v: str = "Grade B: Sub-Pack Second-Life (Micromobility DC Buffer)"
+        self.grade_5v: str = "Port Unpopulated (Waiting for 5V Buffer)"
         self.tier_12v: str = "Grade A"
-        self.tier_5v: str = "Grade B"
+        self.tier_5v: str = "Unpopulated"
 
         # Health, Runtime & Safety
         self.safety_12v: Dict = {
@@ -90,18 +90,18 @@ class TelemetryState:
             "safe_to_operate": True
         }
         self.safety_5v: Dict = {
-            "status": "PASS (ALL PARAMETERS NOMINAL)",
-            "voltage_integrity": "STABLE (USB 5V)",
-            "thermal_runaway_risk": "VERY LOW / SAFE",
-            "impedance_state": "42.0 mΩ (Nominal)",
-            "safe_to_operate": True
+            "status": "PORT EMPTY",
+            "voltage_integrity": "NO INPUT",
+            "thermal_runaway_risk": "SAFE (OFFLINE)",
+            "impedance_state": "OPEN CIRCUIT",
+            "safe_to_operate": False
         }
         self.runtime_12v_hours: float = 4.3
-        self.runtime_5v_hours: float = 3.4
+        self.runtime_5v_hours: float = 0.0
         self.cycles_12v: int = 3180
-        self.cycles_5v: int = 2720
+        self.cycles_5v: int = 0
         self.usable_wh_12v: float = 43.2
-        self.usable_wh_5v: float = 34.0
+        self.usable_wh_5v: float = 0.0
 
         # Relays
         self.load12_active: bool = False
@@ -109,12 +109,12 @@ class TelemetryState:
         self.router_active: bool = True
         self.recommendation: str = "Route Channel A (Grade A 12V Pack) -> Primary Hub Feeder"
 
-        # Real-time Cradle to Gate and Grave LCA
-        self.cradle_to_gate_kg: float = 5.56
-        self.cradle_to_grave_kg: float = 1.39
-        self.critical_minerals_g: float = 65.6
-        self.total_avoided_co2e_kg: float = 6.95
-        self.total_cost_saved_eur: float = 8.42
+        # Real-time Cradle to Gate and Grave LCA (Only connected 12V pack)
+        self.cradle_to_gate_kg: float = 3.11
+        self.cradle_to_grave_kg: float = 0.78
+        self.critical_minerals_g: float = 36.7
+        self.total_avoided_co2e_kg: float = 3.89
+        self.total_cost_saved_eur: float = 4.41
         self.total_saving_pct: float = 61.8
 
         self.history: List[Dict] = []
@@ -272,9 +272,22 @@ def serial_worker():
                 state.usable_wh_12v = uwh12
 
                 # Compute physics for Channel B (5V Buffer: 37.0 Wh nominal)
-                sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5 = compute_live_physics(
-                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, 5.0, 37.0, state.soh_5v, state.ir_5v_mohm
-                )
+                if v5 >= MIN_ACTIVE_VOLTAGE_V:
+                    sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5 = compute_live_physics(
+                        v5, state.v5_baseline, LOAD_RESISTANCE_5V, 5.0, 37.0, state.soh_5v, state.ir_5v_mohm
+                    )
+                else:
+                    sag5, ir5, soh5 = 0.0, 0.0, 0.0
+                    grade5 = "Port Unpopulated (Waiting for 5V Buffer)"
+                    safety5 = {
+                        "status": "PORT EMPTY",
+                        "voltage_integrity": "NO INPUT",
+                        "thermal_runaway_risk": "SAFE (OFFLINE)",
+                        "impedance_state": "OPEN CIRCUIT",
+                        "safe_to_operate": False,
+                    }
+                    rt5, cyc5, uwh5 = 0.0, 0, 0.0
+
                 state.v5_sag = sag5
                 state.ir_5v_mohm = ir5
                 state.soh_5v = soh5
@@ -285,7 +298,7 @@ def serial_worker():
                 state.cycles_5v = cyc5
                 state.usable_wh_5v = uwh5
 
-                # Cradle-to-Gate & Cradle-to-Grave Real-Time LCA Model (Persistent Specimen Evaluation)
+                # Cradle-to-Gate & Cradle-to-Grave Real-Time LCA Model (Only Active Connected Specimen)
                 total_usable_kwh = (state.usable_wh_12v + state.usable_wh_5v) / 1000.0
 
                 # Cradle-to-Gate: Avoided Virgin Mineral Mining & Cathode Precursor Synthesis (72 kg CO2e / kWh)
@@ -337,10 +350,11 @@ threading.Thread(target=serial_worker, daemon=True).start()
 @app.get("/api/status")
 def get_status():
     with state.lock:
-        conn_count = 2  # Bench configuration: Channel A 12V pack + Channel B 5V buffer
-        total_nominal_wh = 81.4
-        total_nominal_mah = 22000
-        total_usable_wh = state.usable_wh_12v + state.usable_wh_5v
+        ch_b_connected = state.v5_live >= MIN_ACTIVE_VOLTAGE_V
+        conn_count = 1 + (1 if ch_b_connected else 0)
+        total_nominal_wh = 44.4 + (37.0 if ch_b_connected else 0.0)
+        total_nominal_mah = 12000 + (10000 if ch_b_connected else 0)
+        total_usable_wh = state.usable_wh_12v + (state.usable_wh_5v if ch_b_connected else 0.0)
         
         return {
             "solution": "BLINC",
@@ -350,13 +364,14 @@ def get_status():
             "timestamp": state.timestamp,
             "system_overview": {
                 "connected_batteries": conn_count,
-                "total_nominal_wh": total_nominal_wh,
+                "total_nominal_wh": round(total_nominal_wh, 1),
                 "total_nominal_mah": total_nominal_mah,
                 "total_usable_wh": round(total_usable_wh, 1),
-                "aggregate_health_pct": round((total_usable_wh / total_nominal_wh * 100.0), 1),
+                "aggregate_health_pct": round((total_usable_wh / total_nominal_wh * 100.0), 1) if total_nominal_wh > 0 else 0.0,
             },
             "channel_a_12v": {
                 "name": "Jump Starter Primary Pack",
+                "connected": True,
                 "nominal_capacity_mah": 12000,
                 "nominal_energy_wh": 44.4,
                 "rated_current_a": 350,
@@ -377,22 +392,29 @@ def get_status():
             },
             "channel_b_5v": {
                 "name": "Mobile Power Bank Buffer",
-                "nominal_capacity_mah": 10000,
-                "nominal_energy_wh": 37.0,
+                "connected": ch_b_connected,
+                "nominal_capacity_mah": 10000 if ch_b_connected else 0,
+                "nominal_energy_wh": 37.0 if ch_b_connected else 0.0,
                 "rated_current_a": 2.4,
                 "peak_current_a": 3.0,
                 "chemistry": "1S Li-ion USB",
                 "voltage_live": state.v5_live,
                 "voltage_baseline": round(state.v5_baseline, 3),
                 "voltage_sag": state.v5_sag,
-                "internal_resistance_mohm": state.ir_5v_mohm,
-                "soh_pct": state.soh_5v,
-                "grade": state.grade_5v,
-                "triage_tier": state.grade_5v,
-                "usable_wh": state.usable_wh_5v,
-                "runtime_hours": state.runtime_5v_hours,
-                "cycles_remaining": state.cycles_5v,
-                "safety": state.safety_5v,
+                "internal_resistance_mohm": state.ir_5v_mohm if ch_b_connected else 0.0,
+                "soh_pct": state.soh_5v if ch_b_connected else 0.0,
+                "grade": state.grade_5v if ch_b_connected else "Port Empty / Unconnected",
+                "triage_tier": state.grade_5v if ch_b_connected else "Unconnected",
+                "usable_wh": state.usable_wh_5v if ch_b_connected else 0.0,
+                "runtime_hours": state.runtime_5v_hours if ch_b_connected else 0.0,
+                "cycles_remaining": state.cycles_5v if ch_b_connected else 0,
+                "safety": state.safety_5v if ch_b_connected else {
+                    "status": "PORT UNPOPULATED",
+                    "voltage_integrity": "STANDBY",
+                    "thermal_runaway_risk": "SAFE (OFFLINE)",
+                    "impedance_state": "OPEN CIRCUIT",
+                    "safe_to_operate": False
+                },
                 "load_active": state.load5_active,
             },
             "lca_impact": {
