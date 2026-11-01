@@ -14,6 +14,7 @@ import serial
 import serial.tools.list_ports
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -40,6 +41,8 @@ CAPEX_TIER2_EUR_KWH = 76.0
 # 5V Mobile Bank: 10,000 mAh (~37 Wh = 0.037 kWh)
 PACK_CAPACITY_12V_KWH = 0.0444
 PACK_CAPACITY_5V_KWH  = 0.0370
+
+FRONTEND_INDEX_PATH = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
 
 app = FastAPI(
     title="BLINC Physical Battery Intelligence & Router",
@@ -72,60 +75,60 @@ class TelemetryState:
         self.v5_sag: float = 0.0
 
         # Dynamic pack auto-identification
-        self.name_12v: str = "Primary Battery Port"
+        self.name_12v: str = "Jump Starter Primary Pack"
         self.chem_12v: str = "4S Li-ion / NMC"
         self.nominal_mah_12v: int = 12000
         self.nominal_wh_12v: float = 44.4
 
-        self.name_5v: str = "Secondary Buffer Port"
+        self.name_5v: str = "Mobile Power Bank Buffer"
         self.chem_5v: str = "1S Li-ion USB"
         self.nominal_mah_5v: int = 10000
         self.nominal_wh_5v: float = 37.0
 
-        # Dynamic Internal Resistance & SOH (with Specimen Latch)
+        # Dynamic Internal Resistance & SOH
         self.ir_12v_mohm: float = 28.5
-        self.ir_5v_mohm: float = 0.0
-        self.soh_12v: float = 97.4
-        self.soh_5v: float = 0.0
+        self.ir_5v_mohm: float = 36.0
+        self.soh_12v: float = 98.2
+        self.soh_5v: float = 95.8
         self.grade_12v: str = "Grade A: Whole-Pack Second-Life (Grid Solar Storage)"
-        self.grade_5v: str = "Port Unpopulated (Waiting for 5V Buffer)"
+        self.grade_5v: str = "Grade A: Whole-Pack Micro-Buffer"
         self.tier_12v: str = "Grade A"
-        self.tier_5v: str = "Unpopulated"
+        self.tier_5v: str = "Grade A"
 
         # Health, Runtime & Safety
         self.safety_12v: Dict = {
-            "status": "PASS (ALL PARAMETERS NOMINAL)",
-            "voltage_integrity": "STABLE (4S Balanced)",
+            "status": "PASS: ALL PARAMETERS NOMINAL",
+            "voltage_integrity": "STABLE",
             "thermal_runaway_risk": "VERY LOW / SAFE",
             "impedance_state": "28.5 mΩ (Nominal)",
             "safe_to_operate": True
         }
         self.safety_5v: Dict = {
-            "status": "PORT EMPTY",
-            "voltage_integrity": "NO INPUT",
-            "thermal_runaway_risk": "SAFE (OFFLINE)",
-            "impedance_state": "OPEN CIRCUIT",
-            "safe_to_operate": False
+            "status": "PASS: ALL PARAMETERS NOMINAL",
+            "voltage_integrity": "STABLE",
+            "thermal_runaway_risk": "VERY LOW / SAFE",
+            "impedance_state": "36.0 mΩ (Nominal)",
+            "safe_to_operate": True
         }
         self.runtime_12v_hours: float = 4.3
-        self.runtime_5v_hours: float = 0.0
-        self.cycles_12v: int = 3180
-        self.cycles_5v: int = 0
-        self.usable_wh_12v: float = 43.2
-        self.usable_wh_5v: float = 0.0
+        self.runtime_5v_hours: float = 3.5
+        self.cycles_12v: int = 3240
+        self.cycles_5v: int = 3040
+        self.usable_wh_12v: float = 43.6
+        self.usable_wh_5v: float = 35.4
 
         # Relays
         self.load12_active: bool = False
         self.load5_active: bool = False
         self.router_active: bool = True
-        self.recommendation: str = "Route Channel A (Grade A 12V Pack) -> Primary Hub Feeder"
+        self.recommendation: str = "Hub Feeder Active"
 
-        # Real-time Cradle to Gate and Grave LCA (Only connected 12V pack)
-        self.cradle_to_gate_kg: float = 3.11
-        self.cradle_to_grave_kg: float = 0.78
-        self.critical_minerals_g: float = 36.7
-        self.total_avoided_co2e_kg: float = 3.89
-        self.total_cost_saved_eur: float = 4.41
+        # Real-time Cradle to Gate and Grave LCA
+        self.cradle_to_gate_kg: float = 0.0
+        self.cradle_to_grave_kg: float = 0.0
+        self.critical_minerals_g: float = 0.0
+        self.total_avoided_co2e_kg: float = 0.0
+        self.total_cost_saved_eur: float = 0.0
         self.total_saving_pct: float = 61.8
 
         self.history: List[Dict] = []
@@ -136,50 +139,83 @@ state = TelemetryState()
 serial_conn: Optional[serial.Serial] = None
 
 
-def compute_live_physics(v_live: float, v_base: float, r_load: float, nominal_v: float, total_wh: float) -> tuple[float, float, float, str, dict, float, int, float, bool]:
-    """Compute physical IR, SOH, Grade A/B/C, Safety checks, and remaining runtime strictly in real time from live telemetry."""
+def compute_live_physics(
+    v_live: float,
+    v_base: float,
+    r_load: float,
+    nominal_v: float,
+    total_wh: float,
+    is_load_on: bool
+) -> tuple[float, float, float, str, dict, float, int, float, bool]:
+    """Compute physical IR, SOH, Grade A/B/C, Safety checks, and runtime strictly in real time from live telemetry."""
     if v_live < MIN_ACTIVE_VOLTAGE_V:
         safety = {
-            "status": "DISCONNECTED",
+            "status": "PORT UNPOPULATED (DISCONNECTED)",
             "voltage_integrity": "NO VOLTAGE DETECTED",
             "thermal_runaway_risk": "SAFE (OFFLINE)",
             "impedance_state": "OPEN CIRCUIT",
             "safe_to_operate": False,
         }
-        return 0.0, 0.0, 0.0, "Disconnected / No Input", safety, 0.0, 0, 0.0, False
+        return 0.0, 0.0, 0.0, "Port Unpopulated", safety, 0.0, 0, 0.0, False
 
-    # Calculate physical voltage sag under load
-    sag = max(0.0, v_base - v_live) if v_base > 0.5 else 0.0
-    
-    # Current draw under load: I = V / R
-    current = (v_live / r_load) if r_load > 0 else 0.001
-    
-    # Internal Resistance: R = dV / I
-    if sag > 0.02 and current > 0.05:
-        ir_ohms = sag / current
-        ir_mohm = round(ir_ohms * 1000.0, 1)
+    # Check whether load is actively drawing current or battery is resting
+    is_12v = nominal_v > 10.0
+    baseline_healthy_ir = 28.5 if is_12v else 36.0
+
+    if is_load_on:
+        sag = max(0.0, v_base - v_live) if v_base > 0.5 else 0.0
+        current = (v_live / r_load) if r_load > 0 else 0.001
+        if sag > 0.03 and current > 0.05:
+            ir_ohms = sag / current
+            ir_mohm = round(ir_ohms * 1000.0, 1)
+        else:
+            ir_mohm = baseline_healthy_ir
+        # SOH degraded by measured impedance growth
+        soh = max(20.0, min(100.0, 100.0 - (ir_mohm - (22.0 if is_12v else 28.0)) * 0.70))
+        soh = round(soh, 1)
     else:
-        # Nominal healthy internal resistance when resting without active DC pulse
-        ir_mohm = 28.5 if nominal_v > 10.0 else 42.0
+        # Resting state: no current flowing through load resistor
+        sag = 0.0
+        ir_mohm = baseline_healthy_ir
 
-    # SOH degradation model derived strictly from internal resistance growth
-    soh = max(20.0, min(100.0, 100.0 - (ir_mohm - 25.0) * 0.75))
-    soh = round(soh, 1)
+        if is_12v:
+            # 4S Li-ion pack voltage curve (nominal 14.8V, full 16.8V)
+            cell_v = v_live / 4.0
+            if cell_v >= 4.05:     # > 16.2V
+                soh = 98.4
+            elif cell_v >= 3.85:   # > 15.4V
+                soh = 94.6
+            elif cell_v >= 3.70:   # > 14.8V
+                soh = 89.2
+            elif cell_v >= 3.45:   # > 13.8V
+                soh = 78.5
+            else:
+                soh = 58.0
+        else:
+            # 5V USB step-up regulated output (rated 4.80V - 5.25V)
+            if v_live >= 4.85:
+                soh = 96.2
+            elif v_live >= 4.70:
+                soh = 91.5
+            elif v_live >= 4.40:
+                soh = 82.0
+            elif v_live >= 3.80:
+                soh = 68.0
+            else:
+                soh = 52.0
 
     # Physical Grade A, B, C Classification
-    if v_live < (nominal_v * 0.65):
-        grade = "Grade C: Deep Depletion / Critical Defect (Hydrometallurgical Recycling)"
-    elif soh >= 80.0:
-        grade = "Grade A: Whole-Pack Second-Life (Grid Solar Storage)"
+    if soh >= 85.0:
+        grade = "Grade A: Whole-Pack Second-Life (Grid Solar Storage)" if is_12v else "Grade A: Whole-Pack Micro-Buffer"
     elif soh >= 65.0:
         grade = "Grade B: Sub-Pack Second-Life (Micromobility DC Buffer)"
     else:
-        grade = "Grade C: End of Life (Material Recovery)"
+        grade = "Grade C: Material Recovery (Hydrometallurgical Recycling)"
 
     # Safety checks
-    overvoltage = (v_live > 17.5) if nominal_v > 10.0 else (v_live > 5.5)
-    deep_discharge = v_live < (nominal_v * 0.70)
-    high_ir = ir_mohm > 140.0
+    overvoltage = (v_live > 17.5) if is_12v else (v_live > 5.5)
+    deep_discharge = (v_live < 10.0) if is_12v else (v_live < 3.0)
+    high_ir = ir_mohm > 130.0
 
     if overvoltage:
         safety_status = "CRITICAL: OVERVOLTAGE DETECTED"
@@ -205,7 +241,7 @@ def compute_live_physics(v_live: float, v_base: float, r_load: float, nominal_v:
     # Remaining Usable Energy
     usable_wh = round(total_wh * (soh / 100.0), 1)
 
-    # Estimated Runtime under standard 10W load
+    # Estimated Runtime under standard 10W bench load
     runtime_hours = round(usable_wh / 10.0, 1) if usable_wh > 0 else 0.0
 
     # Projected stationary cycles remaining before reaching 60% SOH retirement threshold
@@ -255,10 +291,15 @@ def serial_worker():
                 state.router_active = router
 
                 # Update baseline open-circuit voltages with exponential moving filter
-                if not load12 and v12 > 1.0:
+                if not load12 and v12 >= MIN_ACTIVE_VOLTAGE_V:
                     state.v12_baseline = v12 if state.v12_baseline < 1.0 else (0.92 * state.v12_baseline + 0.08 * v12)
-                if not load5 and v5 > 1.0:
+                elif v12 < MIN_ACTIVE_VOLTAGE_V:
+                    state.v12_baseline = 0.0
+
+                if not load5 and v5 >= MIN_ACTIVE_VOLTAGE_V:
                     state.v5_baseline = v5 if state.v5_baseline < 1.0 else (0.92 * state.v5_baseline + 0.08 * v5)
+                elif v5 < MIN_ACTIVE_VOLTAGE_V:
+                    state.v5_baseline = 0.0
 
                 # Auto-detect battery type on Channel A from live voltage
                 nom_v_a = 12.0 if v12 >= 7.5 else 5.0
@@ -270,7 +311,7 @@ def serial_worker():
 
                 # Compute physics for Channel A
                 sag12, ir12, soh12, grade12, safety12, rt12, cyc12, uwh12, active12 = compute_live_physics(
-                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, nom_v_a, cap_wh_a
+                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, nom_v_a, cap_wh_a, load12
                 )
                 state.v12_sag = sag12
                 state.ir_12v_mohm = ir12
@@ -292,7 +333,7 @@ def serial_worker():
 
                 # Compute physics for Channel B
                 sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5, active5 = compute_live_physics(
-                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, nom_v_b, cap_wh_b
+                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, nom_v_b, cap_wh_b, load5
                 )
                 state.v5_sag = sag5
                 state.ir_5v_mohm = ir5
@@ -305,7 +346,10 @@ def serial_worker():
                 state.usable_wh_5v = uwh5
 
                 # Cradle-to-Gate & Cradle-to-Grave Real-Time LCA Model (Only Active Connected Specimen)
-                total_usable_kwh = (state.usable_wh_12v + state.usable_wh_5v) / 1000.0
+                ch_a_conn = v12 >= MIN_ACTIVE_VOLTAGE_V
+                ch_b_conn = v5 >= MIN_ACTIVE_VOLTAGE_V
+                active_usable_wh = (state.usable_wh_12v if ch_a_conn else 0.0) + (state.usable_wh_5v if ch_b_conn else 0.0)
+                total_usable_kwh = active_usable_wh / 1000.0
 
                 # Cradle-to-Gate: Avoided Virgin Mineral Mining & Cathode Precursor Synthesis (72 kg CO2e / kWh)
                 state.cradle_to_gate_kg = round(total_usable_kwh * AVOIDED_CO2E_KG_PER_KWH, 2)
@@ -326,10 +370,14 @@ def serial_worker():
                 state.total_saving_pct = round((1.0 - (cost_avoided / new_cost)) * 100.0, 1) if new_cost > 0 else 0.0
 
                 # BLINC Smart Router recommendation logic
-                if v12 > 5.0 or state.soh_12v >= state.soh_5v:
-                    state.recommendation = "Route Channel A (Grade A 12V Pack) -> Primary Hub Feeder"
+                if ch_a_conn and not ch_b_conn:
+                    state.recommendation = "Route Channel A (Primary Pack) -> Primary Hub Feeder"
+                elif ch_b_conn and not ch_a_conn:
+                    state.recommendation = "Route Channel B (Buffer Storage) -> Micromobility Charger"
+                elif ch_a_conn and ch_b_conn:
+                    state.recommendation = "Dual Routing: Ch A -> Hub Feeder | Ch B -> DC Buffer"
                 else:
-                    state.recommendation = "Route Channel B (5V Buffer) -> Micromobility Charger"
+                    state.recommendation = "Router Standby (No Infeed Detected)"
 
                 # History ring buffer
                 state.history.append({
@@ -351,6 +399,15 @@ def serial_worker():
 
 
 threading.Thread(target=serial_worker, daemon=True).start()
+
+
+@app.get("/", response_class=HTMLResponse)
+def get_dashboard():
+    try:
+        with open(FRONTEND_INDEX_PATH, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), status_code=200)
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>Error loading index.html: {e}</h1>", status_code=500)
 
 
 @app.get("/api/status")
@@ -389,13 +446,13 @@ def get_status():
                 "voltage_sag": state.v12_sag if ch_a_connected else 0.0,
                 "internal_resistance_mohm": state.ir_12v_mohm if ch_a_connected else 0.0,
                 "soh_pct": state.soh_12v if ch_a_connected else 0.0,
-                "grade": state.grade_12v if ch_a_connected else "Standby (No Voltage Detected)",
+                "grade": state.grade_12v if ch_a_connected else "Port Unpopulated",
                 "triage_tier": state.grade_12v if ch_a_connected else "Standby",
                 "usable_wh": state.usable_wh_12v if ch_a_connected else 0.0,
                 "runtime_hours": state.runtime_12v_hours if ch_a_connected else 0.0,
                 "cycles_remaining": state.cycles_12v if ch_a_connected else 0,
                 "safety": state.safety_12v if ch_a_connected else {
-                    "status": "STANDBY: OPEN CIRCUIT",
+                    "status": "PORT UNPOPULATED (DISCONNECTED)",
                     "voltage_integrity": "NO VOLTAGE DETECTED",
                     "thermal_runaway_risk": "SAFE (OFFLINE)",
                     "impedance_state": "OPEN CIRCUIT",
@@ -416,14 +473,14 @@ def get_status():
                 "voltage_sag": state.v5_sag if ch_b_connected else 0.0,
                 "internal_resistance_mohm": state.ir_5v_mohm if ch_b_connected else 0.0,
                 "soh_pct": state.soh_5v if ch_b_connected else 0.0,
-                "grade": state.grade_5v if ch_b_connected else "Port Empty / Unconnected",
-                "triage_tier": state.grade_5v if ch_b_connected else "Unconnected",
+                "grade": state.grade_5v if ch_b_connected else "Port Unpopulated",
+                "triage_tier": state.grade_5v if ch_b_connected else "Standby",
                 "usable_wh": state.usable_wh_5v if ch_b_connected else 0.0,
                 "runtime_hours": state.runtime_5v_hours if ch_b_connected else 0.0,
                 "cycles_remaining": state.cycles_5v if ch_b_connected else 0,
                 "safety": state.safety_5v if ch_b_connected else {
-                    "status": "PORT UNPOPULATED",
-                    "voltage_integrity": "STANDBY",
+                    "status": "PORT UNPOPULATED (DISCONNECTED)",
+                    "voltage_integrity": "NO VOLTAGE DETECTED",
                     "thermal_runaway_risk": "SAFE (OFFLINE)",
                     "impedance_state": "OPEN CIRCUIT",
                     "safe_to_operate": False
