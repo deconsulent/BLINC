@@ -125,24 +125,17 @@ state = TelemetryState()
 serial_conn: Optional[serial.Serial] = None
 
 
-def compute_live_physics(v_live: float, v_base: float, r_load: float, nominal_v: float, total_wh: float, prev_soh: float = 95.0, prev_ir: float = 28.5) -> tuple[float, float, float, str, dict, float, int, float]:
-    """Compute physical IR, SOH, Grade A/B/C, Safety checks, and remaining runtime strictly from real telemetry, with specimen latch."""
+def compute_live_physics(v_live: float, v_base: float, r_load: float, nominal_v: float, total_wh: float) -> tuple[float, float, float, str, dict, float, int, float, bool]:
+    """Compute physical IR, SOH, Grade A/B/C, Safety checks, and remaining runtime strictly in real time from live telemetry."""
     if v_live < MIN_ACTIVE_VOLTAGE_V:
-        # Latch specimen parameters when terminal voltage is resting
-        soh = prev_soh
-        ir_mohm = prev_ir
-        usable_wh = round(total_wh * (soh / 100.0), 1)
-        runtime_hours = round(usable_wh / 10.0, 1)
-        cycles_remaining = int(max(0, (soh - 60.0) * 85))
-        grade = "Grade A: Whole-Pack Second-Life (Grid Solar Storage)" if soh >= 80.0 else "Grade B: Sub-Pack Second-Life (Micromobility DC Buffer)"
         safety = {
-            "status": "PASS (ALL PARAMETERS NOMINAL)",
-            "voltage_integrity": "RESTING (Ready for Test)",
-            "thermal_runaway_risk": "VERY LOW / SAFE",
-            "impedance_state": f"{ir_mohm:.1f} mΩ (Latched)",
-            "safe_to_operate": True,
+            "status": "DISCONNECTED",
+            "voltage_integrity": "NO VOLTAGE DETECTED",
+            "thermal_runaway_risk": "SAFE (OFFLINE)",
+            "impedance_state": "OPEN CIRCUIT",
+            "safe_to_operate": False,
         }
-        return 0.0, ir_mohm, soh, grade, safety, runtime_hours, cycles_remaining, usable_wh
+        return 0.0, 0.0, 0.0, "Disconnected / No Input", safety, 0.0, 0, 0.0, False
 
     # Calculate physical voltage sag under load
     sag = max(0.0, v_base - v_live) if v_base > 0.5 else 0.0
@@ -155,23 +148,22 @@ def compute_live_physics(v_live: float, v_base: float, r_load: float, nominal_v:
         ir_ohms = sag / current
         ir_mohm = round(ir_ohms * 1000.0, 1)
     else:
-        # Standard nominal healthy internal resistance if no active load sag triggered yet
+        # Nominal healthy internal resistance when resting without active DC pulse
         ir_mohm = 28.5 if nominal_v > 10.0 else 42.0
 
-    # SOH degradation model derived from real internal resistance growth
-    # Fresh cell: 20-40 mOhm -> 100% SOH. End of life: > 120 mOhm -> < 60% SOH.
+    # SOH degradation model derived strictly from internal resistance growth
     soh = max(20.0, min(100.0, 100.0 - (ir_mohm - 25.0) * 0.75))
     soh = round(soh, 1)
 
-    # Physical Grade A, B, C Classification (Replaces Tier 1, 2, 3)
+    # Physical Grade A, B, C Classification
     if v_live < (nominal_v * 0.65):
-        grade = "Grade C: Depleted / Severe Defect (Direct Hydrometallurgy)"
+        grade = "Grade C: Deep Depletion / Critical Defect (Hydrometallurgical Recycling)"
     elif soh >= 80.0:
         grade = "Grade A: Whole-Pack Second-Life (Grid Solar Storage)"
     elif soh >= 65.0:
         grade = "Grade B: Sub-Pack Second-Life (Micromobility DC Buffer)"
     else:
-        grade = "Grade C: End of Life (Closed-Loop Material Recovery)"
+        grade = "Grade C: End of Life (Material Recovery)"
 
     # Safety checks
     overvoltage = (v_live > 17.5) if nominal_v > 10.0 else (v_live > 5.5)
@@ -179,16 +171,16 @@ def compute_live_physics(v_live: float, v_base: float, r_load: float, nominal_v:
     high_ir = ir_mohm > 140.0
 
     if overvoltage:
-        safety_status = "CRITICAL: OVERVOLTAGE"
+        safety_status = "CRITICAL: OVERVOLTAGE DETECTED"
         safe_op = False
     elif deep_discharge:
-        safety_status = "ALERT: DEEP DISCHARGE"
+        safety_status = "ALERT: DEEP CELL DISCHARGE"
         safe_op = False
     elif high_ir:
-        safety_status = "WARNING: HIGH IMPEDANCE"
+        safety_status = "WARNING: HIGH IMPEDANCE DEGRADATION"
         safe_op = True
     else:
-        safety_status = "PASS (ALL PARAMETERS NOMINAL)"
+        safety_status = "PASS: ALL PARAMETERS NOMINAL"
         safe_op = True
 
     safety = {
@@ -202,13 +194,13 @@ def compute_live_physics(v_live: float, v_base: float, r_load: float, nominal_v:
     # Remaining Usable Energy
     usable_wh = round(total_wh * (soh / 100.0), 1)
 
-    # Estimated Runtime under standard 10W bench load
+    # Estimated Runtime under standard 10W load
     runtime_hours = round(usable_wh / 10.0, 1) if usable_wh > 0 else 0.0
 
     # Projected stationary cycles remaining before reaching 60% SOH retirement threshold
     cycles_remaining = int(max(0, (soh - 60.0) * 85))
 
-    return round(sag, 3), ir_mohm, soh, grade, safety, runtime_hours, cycles_remaining, usable_wh
+    return round(sag, 3), ir_mohm, soh, grade, safety, runtime_hours, cycles_remaining, usable_wh, True
 
 
 def serial_worker():
@@ -258,8 +250,8 @@ def serial_worker():
                     state.v5_baseline = v5 if state.v5_baseline < 1.0 else (0.92 * state.v5_baseline + 0.08 * v5)
 
                 # Compute physics for Channel A (12V Pack: 44.4 Wh nominal)
-                sag12, ir12, soh12, grade12, safety12, rt12, cyc12, uwh12 = compute_live_physics(
-                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, 12.0, 44.4, state.soh_12v, state.ir_12v_mohm
+                sag12, ir12, soh12, grade12, safety12, rt12, cyc12, uwh12, active12 = compute_live_physics(
+                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, 12.0, 44.4
                 )
                 state.v12_sag = sag12
                 state.ir_12v_mohm = ir12
@@ -272,22 +264,9 @@ def serial_worker():
                 state.usable_wh_12v = uwh12
 
                 # Compute physics for Channel B (5V Buffer: 37.0 Wh nominal)
-                if v5 >= MIN_ACTIVE_VOLTAGE_V:
-                    sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5 = compute_live_physics(
-                        v5, state.v5_baseline, LOAD_RESISTANCE_5V, 5.0, 37.0, state.soh_5v, state.ir_5v_mohm
-                    )
-                else:
-                    sag5, ir5, soh5 = 0.0, 0.0, 0.0
-                    grade5 = "Port Unpopulated (Waiting for 5V Buffer)"
-                    safety5 = {
-                        "status": "PORT EMPTY",
-                        "voltage_integrity": "NO INPUT",
-                        "thermal_runaway_risk": "SAFE (OFFLINE)",
-                        "impedance_state": "OPEN CIRCUIT",
-                        "safe_to_operate": False,
-                    }
-                    rt5, cyc5, uwh5 = 0.0, 0, 0.0
-
+                sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5, active5 = compute_live_physics(
+                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, 5.0, 37.0
+                )
                 state.v5_sag = sag5
                 state.ir_5v_mohm = ir5
                 state.soh_5v = soh5
@@ -350,11 +329,12 @@ threading.Thread(target=serial_worker, daemon=True).start()
 @app.get("/api/status")
 def get_status():
     with state.lock:
+        ch_a_connected = state.v12_live >= MIN_ACTIVE_VOLTAGE_V
         ch_b_connected = state.v5_live >= MIN_ACTIVE_VOLTAGE_V
-        conn_count = 1 + (1 if ch_b_connected else 0)
-        total_nominal_wh = 44.4 + (37.0 if ch_b_connected else 0.0)
-        total_nominal_mah = 12000 + (10000 if ch_b_connected else 0)
-        total_usable_wh = state.usable_wh_12v + (state.usable_wh_5v if ch_b_connected else 0.0)
+        conn_count = (1 if ch_a_connected else 0) + (1 if ch_b_connected else 0)
+        total_nominal_wh = (44.4 if ch_a_connected else 0.0) + (37.0 if ch_b_connected else 0.0)
+        total_nominal_mah = (12000 if ch_a_connected else 0) + (10000 if ch_b_connected else 0)
+        total_usable_wh = (state.usable_wh_12v if ch_a_connected else 0.0) + (state.usable_wh_5v if ch_b_connected else 0.0)
         
         return {
             "solution": "BLINC",
@@ -371,23 +351,29 @@ def get_status():
             },
             "channel_a_12v": {
                 "name": "Jump Starter Primary Pack",
-                "connected": True,
-                "nominal_capacity_mah": 12000,
-                "nominal_energy_wh": 44.4,
+                "connected": ch_a_connected,
+                "nominal_capacity_mah": 12000 if ch_a_connected else 0,
+                "nominal_energy_wh": 44.4 if ch_a_connected else 0.0,
                 "rated_current_a": 350,
                 "peak_current_a": 1800,
                 "chemistry": "4S Li-ion / NMC",
                 "voltage_live": state.v12_live,
                 "voltage_baseline": round(state.v12_baseline, 3),
-                "voltage_sag": state.v12_sag,
-                "internal_resistance_mohm": state.ir_12v_mohm,
-                "soh_pct": state.soh_12v,
-                "grade": state.grade_12v,
-                "triage_tier": state.grade_12v,
-                "usable_wh": state.usable_wh_12v,
-                "runtime_hours": state.runtime_12v_hours,
-                "cycles_remaining": state.cycles_12v,
-                "safety": state.safety_12v,
+                "voltage_sag": state.v12_sag if ch_a_connected else 0.0,
+                "internal_resistance_mohm": state.ir_12v_mohm if ch_a_connected else 0.0,
+                "soh_pct": state.soh_12v if ch_a_connected else 0.0,
+                "grade": state.grade_12v if ch_a_connected else "Standby (No Voltage Detected)",
+                "triage_tier": state.grade_12v if ch_a_connected else "Standby",
+                "usable_wh": state.usable_wh_12v if ch_a_connected else 0.0,
+                "runtime_hours": state.runtime_12v_hours if ch_a_connected else 0.0,
+                "cycles_remaining": state.cycles_12v if ch_a_connected else 0,
+                "safety": state.safety_12v if ch_a_connected else {
+                    "status": "STANDBY: OPEN CIRCUIT",
+                    "voltage_integrity": "NO VOLTAGE DETECTED",
+                    "thermal_runaway_risk": "SAFE (OFFLINE)",
+                    "impedance_state": "OPEN CIRCUIT",
+                    "safe_to_operate": False
+                },
                 "load_active": state.load12_active,
             },
             "channel_b_5v": {
@@ -400,7 +386,7 @@ def get_status():
                 "chemistry": "1S Li-ion USB",
                 "voltage_live": state.v5_live,
                 "voltage_baseline": round(state.v5_baseline, 3),
-                "voltage_sag": state.v5_sag,
+                "voltage_sag": state.v5_sag if ch_b_connected else 0.0,
                 "internal_resistance_mohm": state.ir_5v_mohm if ch_b_connected else 0.0,
                 "soh_pct": state.soh_5v if ch_b_connected else 0.0,
                 "grade": state.grade_5v if ch_b_connected else "Port Empty / Unconnected",
