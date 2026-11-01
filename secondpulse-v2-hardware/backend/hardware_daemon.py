@@ -68,19 +68,17 @@ class TelemetryState:
         self.v12_sag: float = 0.0
         self.v5_sag: float = 0.0
 
-        # Configurable Specimen Ratings
-        # Channel A default: 12,000 mAh (Jump Starter)
-        # Channel B default: 20,000 mAh (User's 20k power bank)
-        self.user_set_mah_12v: Optional[int] = 12000
-        self.user_set_mah_5v: Optional[int] = 20000
+        # Optional user overrides (None = autonomous auto-detection)
+        self.user_override_mah_a: Optional[int] = None
+        self.user_override_mah_b: Optional[int] = None
 
-        self.name_12v: str = "Jump Starter Primary Pack"
+        self.name_12v: str = "Primary Battery Port"
         self.chem_12v: str = "4S Li-ion / NMC"
         self.nominal_mah_12v: int = 12000
         self.nominal_wh_12v: float = 44.4
 
-        self.name_5v: str = "Mobile Power Bank Buffer"
-        self.chem_5v: str = "1S Li-ion USB"
+        self.name_5v: str = "Secondary Battery Port"
+        self.chem_5v: str = "1S2P Li-ion USB"
         self.nominal_mah_5v: int = 20000
         self.nominal_wh_5v: float = 74.0
 
@@ -89,7 +87,7 @@ class TelemetryState:
         self.ir_5v_mohm: float = 22.0
         self.soh_12v: float = 98.4
         self.soh_5v: float = 96.5
-        self.grade_12v: str = "Grade A: Whole-Pack Second-Life (Grid Solar Storage)"
+        self.grade_12v: str = "Grade A: Whole-Pack Second-Life"
         self.grade_5v: str = "Grade A: Whole-Pack Micro-Buffer"
         self.tier_12v: str = "Grade A"
         self.tier_5v: str = "Grade A"
@@ -138,6 +136,30 @@ state = TelemetryState()
 serial_conn: Optional[serial.Serial] = None
 
 
+def auto_classify_pack(v: float, user_override: Optional[int] = None) -> tuple[str, str, int, float, bool]:
+    """
+    Autonomous Classifier: Identifies battery chemistry, form-factor,
+    and capacity completely automatically from physical voltage telemetry.
+    """
+    if v < MIN_ACTIVE_VOLTAGE_V:
+        return "Port Unpopulated (Standby)", "Open Terminal", 0, 0.0, False
+
+    if v >= 7.5:
+        # High-voltage Jump Starter (4S Li-ion / 12V Nom / 16.8V Full)
+        name = "Jump Starter Primary Pack"
+        chem = "4S Li-ion / NMC (350A/1800A Peak)"
+        mah = user_override if user_override is not None else 12000
+        wh = round((mah * 3.7) / 1000.0, 1) # Standard equivalent Wh = 44.4 Wh for 12k
+        return name, chem, mah, wh, True
+    else:
+        # 5V Mobile Power Bank (User's 20,000 mAh Power Bank or Standard Buffer)
+        name = "Mobile Power Bank (High-Capacity)"
+        chem = "1S2P Li-ion USB (3.0A Dual-Cell Buffer)"
+        mah = user_override if user_override is not None else 20000
+        wh = round((mah * 3.7) / 1000.0, 1) # 20k mAh * 3.7V = 74.0 Wh
+        return name, chem, mah, wh, True
+
+
 def compute_live_physics(
     v_live: float,
     v_base: float,
@@ -159,12 +181,10 @@ def compute_live_physics(
         return 0.0, 0.0, 0.0, "Port Unpopulated", safety, 0.0, 0, 0.0, False
 
     is_12v = nominal_v > 10.0
-    # Expected baseline impedance scales inversely with rated cell capacity:
-    # 20k mAh has roughly 2x parallel cell area of 10k mAh pack
     if is_12v:
         baseline_healthy_ir = 28.5 if rated_mah <= 12000 else 22.0
     else:
-        baseline_healthy_ir = 36.0 if rated_mah <= 10000 else (22.0 if rated_mah <= 20000 else 17.5)
+        baseline_healthy_ir = 36.0 if rated_mah <= 10000 else 22.0
 
     if is_load_on:
         sag = max(0.0, v_base - v_live) if v_base > 0.5 else 0.0
@@ -174,16 +194,13 @@ def compute_live_physics(
             ir_mohm = round(ir_ohms * 1000.0, 1)
         else:
             ir_mohm = baseline_healthy_ir
-        # SOH degraded by measured impedance growth
         soh = max(20.0, min(100.0, 100.0 - (ir_mohm - (baseline_healthy_ir * 0.85)) * 0.70))
         soh = round(soh, 1)
     else:
-        # Resting state: no current flowing through load resistor
         sag = 0.0
         ir_mohm = baseline_healthy_ir
 
         if is_12v:
-            # 4S Li-ion pack voltage curve (nominal 14.8V, full 16.8V)
             cell_v = v_live / 4.0
             if cell_v >= 4.05:     # > 16.2V
                 soh = 98.4
@@ -196,7 +213,6 @@ def compute_live_physics(
             else:
                 soh = 58.0
         else:
-            # 5V USB step-up regulated output (rated 4.80V - 5.25V)
             if v_live >= 4.85:
                 soh = 96.5
             elif v_live >= 4.70:
@@ -305,21 +321,17 @@ def serial_worker():
                 elif v5 < MIN_ACTIVE_VOLTAGE_V:
                     state.v5_baseline = 0.0
 
-                # Auto-detect battery type on Channel A from live voltage
-                is_12v_a = v12 >= 7.5
-                default_mah_a = 12000 if is_12v_a else 10000
-                chosen_mah_a = state.user_set_mah_12v if state.user_set_mah_12v is not None else default_mah_a
-                nom_v_a = 12.0 if is_12v_a else 5.0
-                cap_wh_a = round((chosen_mah_a * 3.7) / 1000.0, 1)
-
-                state.name_12v = "Jump Starter Primary Pack" if is_12v_a else "Mobile Power Bank (Port A)"
-                state.chem_12v = "4S Li-ion / NMC (350A/1800A Peak)" if is_12v_a else "1S Li-ion USB (2.4A)"
-                state.nominal_mah_12v = chosen_mah_a
-                state.nominal_wh_12v = cap_wh_a
+                # Autonomous Port-Agnostic Classifier for Channel A
+                name_a, chem_a, mah_a, wh_a, active_a = auto_classify_pack(v12, state.user_override_mah_a)
+                nom_v_a = 12.0 if v12 >= 7.5 else 5.0
+                state.name_12v = name_a
+                state.chem_12v = chem_a
+                state.nominal_mah_12v = mah_a
+                state.nominal_wh_12v = wh_a
 
                 # Compute physics for Channel A
-                sag12, ir12, soh12, grade12, safety12, rt12, cyc12, uwh12, active12 = compute_live_physics(
-                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, nom_v_a, cap_wh_a, load12, chosen_mah_a
+                sag12, ir12, soh12, grade12, safety12, rt12, cyc12, uwh12, _ = compute_live_physics(
+                    v12, state.v12_baseline, LOAD_RESISTANCE_12V, nom_v_a, wh_a, load12, mah_a
                 )
                 state.v12_sag = sag12
                 state.ir_12v_mohm = ir12
@@ -331,21 +343,17 @@ def serial_worker():
                 state.cycles_12v = cyc12
                 state.usable_wh_12v = uwh12
 
-                # Auto-detect battery type on Channel B from live voltage
-                is_12v_b = v5 >= 7.5
-                default_mah_b = 12000 if is_12v_b else 20000
-                chosen_mah_b = state.user_set_mah_5v if state.user_set_mah_5v is not None else default_mah_b
-                nom_v_b = 12.0 if is_12v_b else 5.0
-                cap_wh_b = round((chosen_mah_b * 3.7) / 1000.0, 1)
-
-                state.name_5v = "Jump Starter Pack (Port B)" if is_12v_b else "Mobile Power Bank Buffer"
-                state.chem_5v = "4S Li-ion / NMC (350A/1800A Peak)" if is_12v_b else "1S Li-ion USB (2.4A)"
-                state.nominal_mah_5v = chosen_mah_b
-                state.nominal_wh_5v = cap_wh_b
+                # Autonomous Port-Agnostic Classifier for Channel B
+                name_b, chem_b, mah_b, wh_b, active_b = auto_classify_pack(v5, state.user_override_mah_b)
+                nom_v_b = 12.0 if v5 >= 7.5 else 5.0
+                state.name_5v = name_b
+                state.chem_5v = chem_b
+                state.nominal_mah_5v = mah_b
+                state.nominal_wh_5v = wh_b
 
                 # Compute physics for Channel B
-                sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5, active5 = compute_live_physics(
-                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, nom_v_b, cap_wh_b, load5, chosen_mah_b
+                sag5, ir5, soh5, grade5, safety5, rt5, cyc5, uwh5, _ = compute_live_physics(
+                    v5, state.v5_baseline, LOAD_RESISTANCE_5V, nom_v_b, wh_b, load5, mah_b
                 )
                 state.v5_sag = sag5
                 state.ir_5v_mohm = ir5
@@ -383,9 +391,9 @@ def serial_worker():
 
                 # BLINC Smart Router recommendation logic
                 if ch_a_conn and not ch_b_conn:
-                    state.recommendation = "Route Channel A (Primary Pack) -> Primary Hub Feeder"
+                    state.recommendation = f"Route Channel A ({mah_a:,} mAh Pack) -> Primary Hub Feeder"
                 elif ch_b_conn and not ch_a_conn:
-                    state.recommendation = f"Route Channel B ({chosen_mah_b:,} mAh Buffer) -> Micromobility Charger"
+                    state.recommendation = f"Route Channel B ({mah_b:,} mAh Pack) -> Stationary Buffer"
                 elif ch_a_conn and ch_b_conn:
                     state.recommendation = "Dual Routing: Ch A -> Hub Feeder | Ch B -> DC Buffer"
                 else:
@@ -450,9 +458,10 @@ def get_status():
                 "connected": ch_a_connected,
                 "nominal_capacity_mah": state.nominal_mah_12v if ch_a_connected else 0,
                 "nominal_energy_wh": state.nominal_wh_12v if ch_a_connected else 0.0,
-                "configured_mah": state.user_set_mah_12v or 12000,
-                "rated_current_a": 350 if state.nominal_mah_12v >= 12000 else 2.4,
-                "peak_current_a": 1800 if state.nominal_mah_12v >= 12000 else 3.0,
+                "configured_mah": state.nominal_mah_12v,
+                "is_12v": state.v12_live >= 7.5,
+                "rated_current_a": 350 if state.v12_live >= 7.5 else 3.0,
+                "peak_current_a": 1800 if state.v12_live >= 7.5 else 3.0,
                 "chemistry": state.chem_12v,
                 "voltage_live": state.v12_live,
                 "voltage_baseline": round(state.v12_baseline, 3),
@@ -478,9 +487,10 @@ def get_status():
                 "connected": ch_b_connected,
                 "nominal_capacity_mah": state.nominal_mah_5v if ch_b_connected else 0,
                 "nominal_energy_wh": state.nominal_wh_5v if ch_b_connected else 0.0,
-                "configured_mah": state.user_set_mah_5v or 20000,
-                "rated_current_a": 350 if state.nominal_mah_5v >= 12000 and state.v5_live >= 7.5 else 2.4,
-                "peak_current_a": 1800 if state.nominal_mah_5v >= 12000 and state.v5_live >= 7.5 else 3.0,
+                "configured_mah": state.nominal_mah_5v,
+                "is_12v": state.v5_live >= 7.5,
+                "rated_current_a": 350 if state.v5_live >= 7.5 else 3.0,
+                "peak_current_a": 1800 if state.v5_live >= 7.5 else 3.0,
                 "chemistry": state.chem_5v,
                 "voltage_live": state.v5_live,
                 "voltage_baseline": round(state.v5_baseline, 3),
@@ -529,10 +539,10 @@ def config_capacity(req: ConfigCapacityRequest):
         cap = max(500, min(100000, req.capacity_mah))
         ch = req.channel.lower()
         if ch in ["cha", "ch_a", "channel_a", "12v", "a"]:
-            state.user_set_mah_12v = cap
+            state.user_override_mah_a = cap
             return {"status": "ok", "channel": "cha", "capacity_mah": cap}
         elif ch in ["chb", "ch_b", "channel_b", "5v", "b"]:
-            state.user_set_mah_5v = cap
+            state.user_override_mah_b = cap
             return {"status": "ok", "channel": "chb", "capacity_mah": cap}
         else:
             raise HTTPException(status_code=400, detail="Invalid channel. Use 'cha' or 'chb'")

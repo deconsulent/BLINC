@@ -265,7 +265,7 @@
             margin-top: 1px;
         }
 
-        /* Specimen Capacity Selector Bar */
+        /* Auto-Classified Specimen Bar */
         .specimen-selector {
             display: flex;
             align-items: center;
@@ -281,6 +281,9 @@
         .specimen-label {
             font-weight: 600;
             color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
 
         .specimen-pills {
@@ -504,19 +507,16 @@
             <div class="channel-header">
                 <div>
                     <div class="channel-title" id="cha-title">Channel A • Primary Input</div>
-                    <div class="channel-spec" id="cha-spec">Jump Starter / High-Power Pack</div>
+                    <div class="channel-spec" id="cha-spec">Awaiting Infeed</div>
                 </div>
                 <div class="grade-badge-standby" id="cha-badge">Standby</div>
             </div>
 
-            <!-- Interactive Specimen Rating Selector -->
+            <!-- Auto-Classified Capacity Presets (Silent Inline Switching) -->
             <div class="specimen-selector">
-                <span class="specimen-label">Specimen Rating:</span>
+                <span class="specimen-label" id="cha-label">Auto-Identified:</span>
                 <div class="specimen-pills" id="cha-pills">
-                    <button class="spec-pill active" data-mah="12000" onclick="setCapacity('cha', 12000, this)">12k mAh (44.4 Wh)</button>
-                    <button class="spec-pill" data-mah="16000" onclick="setCapacity('cha', 16000, this)">16k mAh</button>
-                    <button class="spec-pill" data-mah="20000" onclick="setCapacity('cha', 20000, this)">20k mAh</button>
-                    <button class="spec-pill" id="cha-pill-custom" onclick="promptCustomCapacity('cha')">Custom…</button>
+                    <!-- Dynamic pills injected by JS based on detected voltage -->
                 </div>
             </div>
 
@@ -559,19 +559,16 @@
             <div class="channel-header">
                 <div>
                     <div class="channel-title" id="chb-title">Channel B • Secondary Input</div>
-                    <div class="channel-spec" id="chb-spec">Mobile Power Bank Buffer</div>
+                    <div class="channel-spec" id="chb-spec">Awaiting Infeed</div>
                 </div>
                 <div class="grade-badge-standby" id="chb-badge">Standby</div>
             </div>
 
-            <!-- Interactive Specimen Rating Selector -->
+            <!-- Auto-Classified Capacity Presets (Silent Inline Switching) -->
             <div class="specimen-selector">
-                <span class="specimen-label">Specimen Rating:</span>
+                <span class="specimen-label" id="chb-label">Auto-Identified:</span>
                 <div class="specimen-pills" id="chb-pills">
-                    <button class="spec-pill" data-mah="5000" onclick="setCapacity('chb', 5000, this)">5k mAh</button>
-                    <button class="spec-pill" data-mah="10000" onclick="setCapacity('chb', 10000, this)">10k mAh (37 Wh)</button>
-                    <button class="spec-pill active" data-mah="20000" onclick="setCapacity('chb', 20000, this)">20k mAh (74 Wh)</button>
-                    <button class="spec-pill" id="chb-pill-custom" onclick="promptCustomCapacity('chb')">Custom…</button>
+                    <!-- Dynamic pills injected by JS based on detected voltage -->
                 </div>
             </div>
 
@@ -634,6 +631,7 @@
         const apiHost = window.location.hostname || 'localhost';
         const API_URL = 'http://' + apiHost + ':8000';
         let historyBuffer = [];
+        let channelPillState = { cha: null, chb: null };
 
         const canvas = document.getElementById('waveformCanvas');
         const ctx = canvas.getContext('2d');
@@ -706,15 +704,9 @@
             ctx.stroke();
         }
 
-        async function setCapacity(channel, mah, btn) {
+        // Silent inline capacity switcher (Zero popups / zero alerts)
+        async function setCapacity(channel, mah) {
             try {
-                const container = document.getElementById(`${channel}-pills`);
-                if (container) {
-                    const pills = container.querySelectorAll('.spec-pill');
-                    pills.forEach(p => p.classList.remove('active'));
-                    if (btn) btn.classList.add('active');
-                }
-
                 await fetch(`${API_URL}/api/config_capacity`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -726,38 +718,38 @@
             }
         }
 
-        async function promptCustomCapacity(channel) {
-            const current = channel === 'cha' ? 12000 : 20000;
-            const input = prompt(`Enter rated specimen capacity for Channel ${channel.toUpperCase()} in mAh:`, current);
-            if (!input) return;
-            const parsed = parseInt(input.replace(/[^0-9]/g, ''), 10);
-            if (parsed && parsed >= 500 && parsed <= 100000) {
-                const customBtn = document.getElementById(`${channel}-pill-custom`);
-                if (customBtn) customBtn.innerText = `${parsed.toLocaleString()} mAh`;
-                setCapacity(channel, parsed, customBtn);
-            }
-        }
-
-        function syncActivePill(channel, configuredMah) {
-            const container = document.getElementById(`${channel}-pills`);
+        function renderPills(prefix, is12v, configuredMah) {
+            const container = document.getElementById(`${prefix}-pills`);
+            const labelEl = document.getElementById(`${prefix}-label`);
             if (!container) return;
-            const pills = container.querySelectorAll('.spec-pill');
-            let matched = false;
-            pills.forEach(p => {
-                if (p.getAttribute('data-mah') === String(configuredMah)) {
-                    p.classList.add('active');
-                    matched = true;
-                } else if (p.getAttribute('data-mah')) {
-                    p.classList.remove('active');
-                }
-            });
-            const customBtn = document.getElementById(`${channel}-pill-custom`);
-            if (!matched && customBtn) {
-                customBtn.classList.add('active');
-                customBtn.innerText = `${configuredMah.toLocaleString()} mAh`;
-            } else if (matched && customBtn) {
-                customBtn.innerText = 'Custom…';
+
+            const pillKey = `${is12v ? '12v' : '5v'}_${configuredMah}`;
+            if (channelPillState[prefix] === pillKey) return;
+            channelPillState[prefix] = pillKey;
+
+            if (labelEl) {
+                labelEl.innerText = is12v ? 'Auto-Identified (12V Pack):' : 'Auto-Identified (USB Infeed):';
             }
+
+            let options = [];
+            if (is12v) {
+                options = [
+                    { mah: 12000, label: '12k (44.4 Wh)' },
+                    { mah: 16000, label: '16k' },
+                    { mah: 24000, label: '24k' }
+                ];
+            } else {
+                options = [
+                    { mah: 10000, label: '10k (37 Wh)' },
+                    { mah: 20000, label: '20k (74 Wh)' },
+                    { mah: 30000, label: '30k' }
+                ];
+            }
+
+            container.innerHTML = options.map(opt => {
+                const isActive = opt.mah === configuredMah;
+                return `<button class="spec-pill ${isActive ? 'active' : ''}" onclick="setCapacity('${prefix}', ${opt.mah})">${opt.label}</button>`;
+            }).join('');
         }
 
         function updateChannelUI(prefix, chData) {
@@ -779,9 +771,10 @@
 
             const isConn = chData && chData.connected;
             const liveV = (chData && chData.voltage_live) ? chData.voltage_live : 0.0;
-            const configuredMah = (chData && chData.configured_mah) ? chData.configured_mah : (prefix === 'cha' ? 12000 : 20000);
+            const is12v = chData && chData.is_12v;
+            const configuredMah = (chData && chData.configured_mah) ? chData.configured_mah : (is12v ? 12000 : 20000);
 
-            syncActivePill(prefix, configuredMah);
+            renderPills(prefix, is12v, configuredMah);
 
             if (voltEl) voltEl.innerHTML = `${liveV.toFixed(2)} <span style="font-size: 0.75rem; font-weight: 500;">V</span>`;
 
@@ -831,7 +824,7 @@
                     card.style.opacity = '0.75';
                 }
                 if (titleEl) titleEl.innerText = prefix === 'cha' ? 'Channel A • Primary Input (Standby)' : 'Channel B • Secondary Input (Standby)';
-                if (specEl) specEl.innerText = prefix === 'cha' ? 'Awaiting 12V Jump Starter Infeed' : 'Awaiting 5V Mobile Power Bank Infeed';
+                if (specEl) specEl.innerText = 'Awaiting Infeed (Connect 12V Jump Starter or 5V Power Bank)';
                 if (badgeEl) {
                     badgeEl.className = 'grade-badge-standby';
                     badgeEl.innerText = 'Port Unpopulated';
