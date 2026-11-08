@@ -1,4 +1,4 @@
-# CHILL System Launcher - Cells Housed In Low-stress Life
+# BLINC System Launcher - Batteries Like It Never Crashed
 # Climathon 2026 - Edge Hardware Diagnostic Console
 
 param(
@@ -11,7 +11,7 @@ $ErrorActionPreference = "Continue"
 
 Write-Host ""
 Write-Host " ===================================================================== " -ForegroundColor Cyan
-Write-Host "   CHILL : Cells Housed In Low-stress Life" -ForegroundColor Green
+Write-Host "   BLINC : Batteries Like It Never Crashed" -ForegroundColor Green
 Write-Host "   Climathon 2026 - Circular Stationary Battery Storage System" -ForegroundColor Gray
 Write-Host " ===================================================================== " -ForegroundColor Cyan
 Write-Host ""
@@ -86,7 +86,7 @@ for ($i = 0; $i -lt $MaxRetries; $i++) {
 }
 
 if ($Online) {
-    Write-Host " [OK] CHILL Core Daemon Online & Operational!" -ForegroundColor Green
+    Write-Host " [OK] BLINC Core Daemon Online & Operational!" -ForegroundColor Green
 }
 else {
     Write-Host " [i] Hardware daemon starting up in background..." -ForegroundColor Yellow

@@ -39,8 +39,8 @@ CAPEX_TIER2_EUR_KWH = 76.0
 FRONTEND_INDEX_PATH = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
 
 app = FastAPI(
-    title="CHILL Physical Battery Intelligence & Router",
-    description="CHILL: Cells Housed In Low-stress Life - Apple-grade Physical Battery Life, Grade Triage, Safety, & Cradle-to-Grave LCA Engine",
+    title="BLINC Physical Battery Intelligence & Router",
+    description="BLINC: Batteries Like It Never Crashed - Apple-grade Physical Battery Life, Grade Triage, Safety, & Cradle-to-Grave LCA Engine",
     version="3.0.0",
 )
 
@@ -464,8 +464,8 @@ def get_status():
         total_usable_wh = (state.usable_wh_12v if ch_a_connected else 0.0) + (state.usable_wh_5v if ch_b_connected else 0.0)
         
         return {
-            "solution": "CHILL",
-            "full_name": "Cells Housed In Low-stress Life",
+            "solution": "BLINC",
+            "full_name": "Batteries Like It Never Crashed",
             "connected": state.connected,
             "port": state.port,
             "last_raw_line": state.last_raw_line,

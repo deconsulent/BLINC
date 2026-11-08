@@ -4,7 +4,7 @@ title BLINC Diagnostic Console Launcher
 cd /d "%~dp0"
 
 echo =====================================================================
-echo    BLINC : Battery Life ^& Intelligence Node Controller
+echo    BLINC : Batteries Like It Never Crashed
 echo    Climathon 2026 - Edge Hardware Diagnostic Console
 echo =====================================================================
 echo.

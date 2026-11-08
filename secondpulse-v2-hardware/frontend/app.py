@@ -1,5 +1,5 @@
 # frontend/app.py
-# CHILL: Cells Housed In Low-stress Life
+# BLINC: Batteries Like It Never Crashed
 # Authentic Apple Engineering Interface (Light & Dark Mode)
 # Zero-Slop Factual Telemetry • Hardware Canvas Waveform • Pure Real-Time Sync
 
@@ -8,7 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="CHILL • Cells Housed In Low-stress Life",
+    page_title="BLINC • Batteries Like It Never Crashed",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
