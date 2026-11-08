@@ -1,5 +1,5 @@
 # frontend/app.py
-# BLINC: Battery Life & Intelligence Node Controller
+# CHILL: Cells Housed In Low-stress Life
 # Authentic Apple Engineering Interface (Light & Dark Mode)
 # Zero-Slop Factual Telemetry • Hardware Canvas Waveform • Pure Real-Time Sync
 
@@ -8,7 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="BLINC Battery Intelligence",
+    page_title="CHILL • Cells Housed In Low-stress Life",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",

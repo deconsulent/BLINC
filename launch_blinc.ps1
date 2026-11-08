@@ -1,4 +1,4 @@
-# BLINC System Launcher - Battery Life & Intelligence Node Controller
+# CHILL System Launcher - Cells Housed In Low-stress Life
 # Climathon 2026 - Edge Hardware Diagnostic Console
 
 param(
@@ -11,7 +11,7 @@ $ErrorActionPreference = "Continue"
 
 Write-Host ""
 Write-Host " ===================================================================== " -ForegroundColor Cyan
-Write-Host "   BLINC : Battery Life & Intelligence Node Controller" -ForegroundColor Green
+Write-Host "   CHILL : Cells Housed In Low-stress Life" -ForegroundColor Green
 Write-Host "   Climathon 2026 - Circular Stationary Battery Storage System" -ForegroundColor Gray
 Write-Host " ===================================================================== " -ForegroundColor Cyan
 Write-Host ""
@@ -77,7 +77,7 @@ for ($i = 0; $i -lt $MaxRetries; $i++) {
     Start-Sleep -Milliseconds 600
     try {
         $res = Invoke-RestMethod -Uri "http://localhost:8000/api/status" -TimeoutSec 1 -ErrorAction Stop
-        if ($res.solution -eq "BLINC") {
+        if ($res.solution -eq "CHILL" -or $res.solution -eq "BLINC") {
             $Online = $true
             break
         }
@@ -86,7 +86,7 @@ for ($i = 0; $i -lt $MaxRetries; $i++) {
 }
 
 if ($Online) {
-    Write-Host " [OK] BLINC Core Daemon Online & Operational!" -ForegroundColor Green
+    Write-Host " [OK] CHILL Core Daemon Online & Operational!" -ForegroundColor Green
 }
 else {
     Write-Host " [i] Hardware daemon starting up in background..." -ForegroundColor Yellow
