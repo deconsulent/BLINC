@@ -5,3 +5,4 @@ if (Test-Path $ParentScript) {
 } else {
     Write-Host "Error: Root launch script not found at $ParentScript" -ForegroundColor Red
 }
+
